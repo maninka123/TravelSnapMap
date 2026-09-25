@@ -45,4 +45,4 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [ ] Scan your real Photos library (needs you to click "Allow" for Photos access)
 - [x] README (setup, architecture, privacy, cost controls)
 - [x] `.gitignore` (secrets, build output)
-- [ ] Push to GitHub
+- [x] Push to GitHub (github.com/maninka123/TravelSnapMap)
