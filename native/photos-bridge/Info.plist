@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.travelsnapmap.photos-bridge</string>
+	<key>CFBundleName</key>
+	<string>TravelSnapMap Photos Bridge</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>TravelSnapMap transcribes the voice in Instagram Reels you import, on your Mac, to find travel tips.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>TravelSnapMap reads your screenshots to find saved travel places. Text recognition runs on your Mac.</string>
+</dict>
+</plist>

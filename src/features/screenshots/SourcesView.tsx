@@ -1,0 +1,109 @@
+import { useState } from "react";
+import { LibraryService, ProcessingService } from "../../api/services";
+import type { ScreenshotView } from "../../api/types";
+import { Empty, Pill, Thumb } from "../../components/common";
+import { formatDate, formatTime, PROCESSING, SOURCE } from "../../lib/labels";
+import { useAction, useLoad, useNav } from "../../lib/nav";
+import { ImportReelDialog } from "../reels/ImportReelDialog";
+
+const VIEWS: { key: ScreenshotView; label: string }[] = [
+  { key: "all", label: "All travel" },
+  { key: "processed", label: "Processed" },
+  { key: "needsReview", label: "Needs review" },
+  { key: "multiplePlaces", label: "Multiple places" },
+  { key: "noPlace", label: "No place found" },
+  { key: "lowConfidence", label: "Low confidence" },
+  { key: "pending", label: "Pending" },
+  { key: "failed", label: "Failed" },
+  { key: "notTravel", label: "Not travel" },
+  { key: "ignored", label: "Ignored" },
+];
+
+/** The library of evidence: travel screenshots and Instagram Reels side by side. */
+export function SourcesView() {
+  const nav = useNav();
+  const [view, setView] = useState<ScreenshotView>("all");
+  const [kind, setKind] = useState<"all" | "screenshot" | "reel">("all");
+  const [search, setSearch] = useState("");
+  const [importing, setImporting] = useState(false);
+  const action = useAction();
+  const { data: items = [], error } = useLoad(() => LibraryService.items(view, search), [view, search]);
+  const shown = items.filter((i) => kind === "all" || i.kind === kind);
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <h2>Sources</h2>
+        <div className="segmented">
+          {(["all", "screenshot", "reel"] as const).map((k) => (
+            <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
+              {k === "all" ? "All" : k === "screenshot" ? "📸 Screenshots" : "🎬 Reels"}
+            </button>
+          ))}
+        </div>
+        <button className="btn primary" onClick={() => setImporting(true)}>🎬 Import Reel</button>
+        <button className="btn" onClick={() => action.run(() => ProcessingService.start(true))}>Scan Photos</button>
+      </div>
+
+      <div className="toolbar">
+        <input style={{ width: 280 }} placeholder="Search text, captions, transcripts, creators…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        {VIEWS.map((v) => (
+          <button key={v.key} className={`chip-btn ${view === v.key ? "active" : ""}`} onClick={() => setView(v.key)}>{v.label}</button>
+        ))}
+        {(view === "failed" || view === "needsReview") && shown.length > 0 && (
+          <button className="btn small" onClick={() => action.run(() => ProcessingService.reprocess(view === "failed" ? "failed" : "needsReview"))}>
+            Reprocess all
+          </button>
+        )}
+      </div>
+
+      {error && <p className="bad">{error}</p>}
+      {shown.length === 0 ? (
+        <Empty icon="📸" title="Nothing here yet">
+          Scan your Photos library for screenshots, or paste an Instagram Reel link with “Import Reel”.
+        </Empty>
+      ) : (
+        <div className="grid small-tiles">
+          {shown.map((item) => {
+            if (item.kind === "reel") {
+              const r = item.reel;
+              const p = PROCESSING[r.status];
+              return (
+                <div key={`r-${r.id}`} className="tile portrait" onClick={() => nav.openReel(r.id)}>
+                  <span className="kind-badge">🎬 {r.durationSec ? formatTime(r.durationSec) : "Reel"}</span>
+                  <Thumb path={r.thumbnailPath} fallback="🎬" />
+                  <div className="tile-body">
+                    <span className="small strong tile-title">{r.creator ?? "Instagram Reel"}</span>
+                    <span className="muted small tile-title">{r.caption ?? r.url}</span>
+                    <div className="row wrap">
+                      <Pill tone={p.tone}>{p.label}</Pill>
+                      {r.placeCount > 0 && <span className="muted small">{r.placeCount} 📍</span>}
+                      {r.transcript.length > 0 && <span className="muted small" title="Voice transcript saved">🎙️</span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            const s = item.screenshot;
+            const p = PROCESSING[s.status];
+            return (
+              <div key={`s-${s.id}`} className="tile portrait" onClick={() => nav.openScreenshot(s.id)}>
+                <span className="kind-badge">📸</span>
+                <Thumb path={s.thumbnailPath} />
+                <div className="tile-body">
+                  <span className="small">{formatDate(s.creationDate)}</span>
+                  <span className="muted small">{SOURCE[s.sourceType]}{s.creator ? ` · ${s.creator}` : ""}</span>
+                  <div className="row wrap">
+                    <Pill tone={p.tone}>{p.label}</Pill>
+                    {s.placeCount > 0 && <span className="muted small">{s.placeCount} 📍</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {importing && <ImportReelDialog onClose={() => setImporting(false)} />}
+    </div>
+  );
+}

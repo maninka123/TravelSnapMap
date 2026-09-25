@@ -1,0 +1,4 @@
+# Build with the Command Line Tools so the full Xcode app (and its licence prompt) is never needed.
+# Your own DEVELOPER_DIR, if set, takes precedence.
+[env]
+DEVELOPER_DIR = { value = "/Library/Developer/CommandLineTools", force = false }
