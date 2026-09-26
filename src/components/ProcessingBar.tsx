@@ -45,7 +45,7 @@ export function ProcessingBar() {
         {snap.running && snap.total > snap.newlyDiscovered && (
           <div className="pb-note">
             {snap.newlyDiscovered > 0 ? `${snap.newlyDiscovered.toLocaleString()} new + ` : ""}
-            {(snap.total - snap.newlyDiscovered).toLocaleString()} unfinished from earlier. Screenshots already done are skipped — nothing is processed twice.
+            {(snap.total - snap.newlyDiscovered).toLocaleString()} left from earlier · done ones skipped
           </div>
         )}
         {snap.running && <div className="progress"><div style={{ width: `${pct}%` }} /></div>}
