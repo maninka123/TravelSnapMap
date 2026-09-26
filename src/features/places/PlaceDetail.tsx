@@ -1,6 +1,6 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PlaceService, TripService } from "../../api/services";
+import { PlaceService, ReelService, ScreenshotService, TripService } from "../../api/services";
 import type { Fact, Place, PlaceDetail as Detail, PlaceWarning } from "../../api/types";
 import { ErrorNote, Modal, PlaceLine, Pill, Thumb } from "../../components/common";
 import { AddFact, FactRow } from "../../components/FactsEditor";
@@ -18,6 +18,13 @@ export function PlaceDetail({ id }: { id: string }) {
   const { data, error } = useLoad(() => PlaceService.detail(id), [id]);
   const action = useAction();
   const [dialog, setDialog] = useState<"location" | "merge" | "split" | "trip" | null>(null);
+
+  // Move one source to Not travel; if that was the place's only support, the place is gone — go back.
+  const notTravel = async (run: () => Promise<void>) => {
+    if (await action.run(run) === undefined) return;
+    const stillThere = await PlaceService.detail(id).then(() => true, () => false);
+    if (!stillThere) nav.back();
+  };
 
   if (error) return <p className="bad">{error}</p>;
   if (!data) return <p className="muted">Loading…</p>;
@@ -51,9 +58,12 @@ export function PlaceDetail({ id }: { id: string }) {
               <button className="btn ghost" onClick={() => setDialog("location")}>Correct location</button>
               <button className="btn ghost" onClick={() => setDialog("merge")}>Merge into another place…</button>
               <button className="btn ghost" disabled={data.screenshots.length + data.reels.length < 2} onClick={() => setDialog("split")}>Split sources into a new place…</button>
-              <button className="btn ghost danger" onClick={async () => {
-                if (await action.run(() => PlaceService.remove(place.id)) !== undefined) nav.back();
-              }}>Delete place</button>
+              {/* Places from screenshots/Reels go away by marking their sources Not travel; only places you added yourself are deleted directly. */}
+              {data.screenshots.length + data.reels.length === 0 && (
+                <button className="btn ghost danger" onClick={async () => {
+                  if (await action.run(() => PlaceService.remove(place.id)) !== undefined) nav.back();
+                }}>Delete place</button>
+              )}
             </div>
           </details>
         </div>
@@ -99,7 +109,11 @@ export function PlaceDetail({ id }: { id: string }) {
             <Thumb path={r.thumbnailPath} fallback="🎬" />
             <div className="tile-body">
               <span className="small strong">🎬 Reel {r.creator ?? ""}</span>
-              <span className="muted small">{formatDate(r.createdAt)}</span>
+              <div className="row">
+                <span className="muted small grow">{formatDate(r.createdAt)}</span>
+                <button className="btn small not-travel-btn" title="Move this Reel to Not travel. The place stays if other sources support it."
+                        onClick={(e) => { e.stopPropagation(); void notTravel(() => ReelService.action(r.id, "markNotTravel")); }}>Not travel</button>
+              </div>
             </div>
           </div>
         ))}
@@ -110,8 +124,8 @@ export function PlaceDetail({ id }: { id: string }) {
               <span className="small">{formatDate(s.creationDate)}</span>
               <div className="row">
                 <span className="muted small grow">{SOURCE[s.sourceType]}</span>
-                <button className="close-btn small" title="Remove this screenshot from the place"
-                        onClick={(e) => { e.stopPropagation(); void action.run(() => PlaceService.removeScreenshot(place.id, s.id)); }}>✕</button>
+                <button className="btn small not-travel-btn" title="Move this screenshot to Not travel. The place stays if other sources support it."
+                        onClick={(e) => { e.stopPropagation(); void notTravel(() => ScreenshotService.action(s.id, "markNotTravel")); }}>Not travel</button>
               </div>
             </div>
           </div>

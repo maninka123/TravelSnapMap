@@ -488,6 +488,12 @@ pub async fn reel_action(state: State<'_, AppState>, id: String, action: String)
             state.db.detach_source(None, Some(&id)).map_err(err)?;
             state.db.finish_reel(&id, ProcessingStatus::Ignored, Some("ignored by you")).map_err(err)?;
         }
+        "markNotTravel" => {
+            // Same rule as screenshots: places it alone supported go; places other sources support stay.
+            state.db.detach_source(None, Some(&id)).map_err(err)?;
+            state.db.with(|c| c.execute("UPDATE reels SET classification = 'notTravel' WHERE id = ?1", [&id])).map_err(err)?;
+            state.db.finish_reel(&id, ProcessingStatus::NotTravel, Some("marked not travel by you")).map_err(err)?;
+        }
         "delete" => {
             state.db.delete_reel(&id).map_err(err)?;
             let _ = std::fs::remove_dir_all(state.pipeline.data_dir.join("reels").join(&id));

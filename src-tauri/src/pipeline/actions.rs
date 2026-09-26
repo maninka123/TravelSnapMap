@@ -22,7 +22,8 @@ impl Pipeline {
 
     pub fn mark_not_travel(&self, screenshot_id: &str) -> Result<()> {
         self.db.set_user_classification(screenshot_id, Some(Classification::NotTravel))?;
-        self.db.clear_derived(screenshot_id, true)?;
+        // Stops counting anywhere: places it alone supported go; places other sources support stay.
+        self.db.detach_source(Some(screenshot_id), None)?;
         self.db.set_classification(screenshot_id, Classification::NotTravel, None, 0)?;
         self.db.finish_screenshot(screenshot_id, ProcessingStatus::NotTravel, Some("marked not travel by you"))?;
         Ok(())

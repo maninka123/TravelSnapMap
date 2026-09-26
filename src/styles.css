@@ -680,3 +680,7 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .more-item:hover { background: var(--fill); }
 .more-item:active { background: var(--fill-strong); }
 .more-item.active { color: var(--accent); font-weight: 600; }
+
+/* "Not travel" on a place's sources: amber, clearly different from destructive red */
+.not-travel-btn { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.not-travel-btn:hover { background: color-mix(in srgb, var(--warn) 22%, transparent); }

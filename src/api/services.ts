@@ -136,7 +136,7 @@ export const ReelService = {
   /** Fallback when Instagram media isn't accessible: use a video saved in Photos. */
   listPhotoVideos: () => invoke<PhotoVideo[]>("list_photo_videos"),
   attachPhotoVideo: (reelId: string | null, assetId: string) => invoke<string>("import_reel_video_from_photos", { reelId, assetId }),
-  action: (id: string, action: "reprocess" | "ignore" | "delete") => invoke<void>("reel_action", { id, action }),
+  action: (id: string, action: "reprocess" | "ignore" | "delete" | "markNotTravel") => invoke<void>("reel_action", { id, action }),
   toolStatus: () => invoke<{ ytDlp: string | null }>("reel_tool_status"),
   /** Re-transcribe with a language ("auto" to detect again); the extraction is updated afterwards. */
   retranscribe: (id: string, locale: string) => invoke<void>("retranscribe_reel", { id, locale }),
