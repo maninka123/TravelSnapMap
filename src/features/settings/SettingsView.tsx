@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AppService, PhotoLibraryService, ProcessingService, ReelService, SettingsService } from "../../api/services";
 import type { AppConfig, RunReport } from "../../api/types";
 import { ErrorNote, Modal } from "../../components/common";
-import { RunReportView } from "../../components/ScanControls";
+import { RunReportView, TestRunDialog } from "../../components/ScanControls";
 import { BackupCard } from "./BackupCard";
 import { formatDate } from "../../lib/labels";
 import { useAction, useLoad } from "../../lib/nav";
@@ -15,6 +15,7 @@ export function SettingsView() {
   const { data: locales = [] } = useLoad(() => ReelService.speechLocales(), []);
   const { data: runs = [] } = useLoad(() => ProcessingService.runs(), []);
   const [runReport, setRunReport] = useState<RunReport>();
+  const [testing, setTesting] = useState(false);
   const [config, setConfig] = useState<AppConfig>();
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
@@ -168,9 +169,19 @@ export function SettingsView() {
         </div>
       </div>
 
+      <div className="section"><h3>Diagnostics</h3></div>
+      <div className="card test-run-card">
+        <div className="grow">
+          <div className="strong">Test on a sample</div>
+          <div className="muted small">Process 10–100 unprocessed screenshots and see how well it works — travel found, places resolved, time and estimated AI cost — before running the whole library.</div>
+        </div>
+        <button className="btn" onClick={() => setTesting(true)}>🧪 Test run…</button>
+      </div>
+      {testing && <TestRunDialog onClose={() => setTesting(false)} />}
+
       {runs.length > 0 && (
         <>
-          <div className="section"><h3>Test runs &amp; scans</h3></div>
+          <div className="section"><h4>Past test runs &amp; scans</h4></div>
           <div className="list">
             {runs.map((r) => (
               <div key={r.id} className="list-row" onClick={async () => setRunReport((await ProcessingService.runReport(r.id)) ?? undefined)}>
@@ -186,7 +197,7 @@ export function SettingsView() {
 
       {diag && (
         <>
-          <div className="section"><h3>Diagnostics</h3></div>
+          <div className="section"><h4>Usage &amp; performance</h4></div>
           <div className="stat-grid">
             {[
               ["Screenshots", diag.totalScreenshots], ["Travel", diag.travelScreenshots], ["Skipped locally", diag.skippedLocally],

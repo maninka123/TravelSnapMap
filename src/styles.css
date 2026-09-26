@@ -417,3 +417,4 @@ audio { width: 100%; }
 .filter-more summary { list-style: none; }
 .filter-more summary::-webkit-details-marker { display: none; }
 @media (max-width: 760px) { .library-progress { grid-template-columns: 1fr; } }
+.test-run-card { display: flex; gap: 14px; align-items: center; }

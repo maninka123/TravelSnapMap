@@ -6,10 +6,9 @@ import { formatDate, pct, PROCESSING, SOURCE } from "../lib/labels";
 import { useAction, useLoad, useNav } from "../lib/nav";
 import { ErrorNote, Modal, Pill, Thumb } from "./common";
 
-/** Main screenshot actions: Scan New Screenshots, Import Folder…, Test run…. */
-export function ScanControls({ compact = false }: { compact?: boolean }) {
+/** Main screenshot actions: Scan New Screenshots and Import Folder… (test runs live in Settings → Diagnostics). */
+export function ScanControls(_: { compact?: boolean } = {}) {
   const { data: preview, reload } = useLoad(() => ProcessingService.scanPreview(), []);
-  const [testing, setTesting] = useState(false);
   const action = useAction();
   const newCount = (preview?.photos.new ?? 0) + (preview?.folders ?? []).reduce((n, f) => n + (f.summary.new ?? 0), 0);
 
@@ -28,10 +27,8 @@ export function ScanControls({ compact = false }: { compact?: boolean }) {
         📸 Scan New Screenshots{preview ? ` (${newCount.toLocaleString()} new)` : ""}
       </button>
       <button className="btn" onClick={importFolder} title="Screenshots from any device: choose a folder of PNG/JPG/HEIC images">📁 Import Folder…</button>
-      {!compact && <button className="btn" onClick={() => setTesting(true)}>🧪 Test run…</button>}
       {preview?.photos.error && <span className="muted small" title={preview.photos.error}>Photos: not available</span>}
       <ErrorNote error={action.error} onClose={action.clearError} />
-      {testing && <TestRunDialog onClose={() => setTesting(false)} />}
     </>
   );
 }

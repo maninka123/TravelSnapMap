@@ -88,3 +88,5 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] iCloud Photos download errors retried with backoff, then parked for automatic retry
 - [x] Bulk Reel import: paste many links or choose a text file; processed one after another
 - [x] `npm run tauri …` works even when Terminal doesn't have Rust on its PATH
+
+- [x] Test run moved from Sources to Settings → Diagnostics ("Test on a sample")
