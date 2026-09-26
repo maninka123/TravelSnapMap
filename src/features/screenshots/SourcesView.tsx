@@ -83,7 +83,8 @@ export function SourcesView() {
         </div>
         <details className="menu filter-more" key={view}>
           <summary className={`chip-btn ${MORE.some((m) => m.key === view) ? "active" : ""}`}>
-            {MORE.find((m) => m.key === view)?.label ?? "More"} ▾
+            {MORE.find((m) => m.key === view)?.label ?? "More"}
+            {MORE.some((m) => m.key === view) && counts && <span className="tab-count">{counts.current.toLocaleString()}</span>} ▾
           </summary>
           <div className="menu-items card" style={{ left: 0, right: "auto" }}>
             {MORE.map((m) => (
