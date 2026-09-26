@@ -4,7 +4,7 @@ import type { PlaceFilter } from "../../api/types";
 import { CategoryChip, Empty, Flag, Pill, PlaceLine, StatusBadge, Thumb } from "../../components/common";
 import { QuickAddPlace } from "./QuickAddPlace";
 import { CATEGORY, STATUS } from "../../lib/labels";
-import { CategoryBadge } from "../../lib/categoryIcons";
+import { CategoryBadge, GROUPS, groupOf, type CategoryGroup } from "../../lib/categoryIcons";
 import { useLoad, useNav } from "../../lib/nav";
 
 export function PlacesView() {
@@ -13,7 +13,9 @@ export function PlacesView() {
   const [filter, setFilter] = useState<PlaceFilter>({ sort: "recent" });
   const [adding, setAdding] = useState(false);
   const { data: loaded, error } = useLoad(() => PlaceService.list(filter), [JSON.stringify(filter)]);
-  const places = useMemo(() => loaded ?? [], [loaded]);
+  // Kind of place is filtered by group (Food & drink, Stay, Sights…), the same groups as the map.
+  const [group, setGroup] = useState<CategoryGroup | "">("");
+  const places = useMemo(() => (loaded ?? []).filter((p) => !group || groupOf(p.category) === group), [loaded, group]);
   const { data: all = [] } = useLoad(() => PlaceService.list({}), []);
   const { data: warnings = {} } = useLoad(() => PlaceService.warnings(), []);
 
@@ -36,7 +38,7 @@ export function PlacesView() {
       inArea.forEach((p) => m.set(key(p), (m.get(key(p)) ?? 0) + 1));
       return m;
     };
-    return { categories: tally((p) => p.category), statuses: tally((p) => p.personalStatus) };
+    return { categories: tally((p) => groupOf(p.category)), statuses: tally((p) => p.personalStatus) };
   }, [all, filter.countryCode, filter.city]);
 
   const set = (patch: Partial<PlaceFilter>) => setFilter((f) => ({ ...f, ...patch }));
@@ -65,7 +67,7 @@ export function PlacesView() {
       <div className="toolbar">
         <input className="grow" style={{ maxWidth: 360 }} placeholder="Search names, cities, tips, creators, apps…"
                value={filter.search ?? ""} onChange={(e) => set({ search: e.target.value || undefined })} />
-        <select value={filter.countryCode ?? ""} onChange={(e) => set({ countryCode: e.target.value || undefined, city: undefined, category: undefined, status: undefined })}>
+        <select value={filter.countryCode ?? ""} onChange={(e) => { setGroup(""); set({ countryCode: e.target.value || undefined, city: undefined, status: undefined }); }}>
           <option value="">All countries</option>
           {countries.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select>
@@ -73,9 +75,9 @@ export function PlacesView() {
           <option value="">All cities</option>
           {cities.map((c) => <option key={c}>{c}</option>)}
         </select>
-        <select value={filter.category ?? ""} onChange={(e) => set({ category: e.target.value || undefined })}>
-          <option value="">All categories</option>
-          {Object.entries(CATEGORY).filter(([k]) => available.categories.has(k)).map(([k, c]) => <option key={k} value={k}>{c.label} ({available.categories.get(k)})</option>)}
+        <select value={group} onChange={(e) => setGroup(e.target.value as CategoryGroup | "")}>
+          <option value="">All kinds</option>
+          {Object.entries(GROUPS).filter(([k]) => available.categories.has(k)).map(([k, g]) => <option key={k} value={k}>{g.label} ({available.categories.get(k)})</option>)}
         </select>
         <select value={filter.status ?? ""} onChange={(e) => set({ status: e.target.value || undefined })}>
           <option value="">Any status</option>

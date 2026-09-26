@@ -108,4 +108,4 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Edit processed results: edit/delete/add tips on screenshots, Reels and places (kept on reprocess); add/remove places on Reels; remove a wrong place from a screenshot
 - [x] Place picker everywhere: your saved places first ("Saved"), then Apple Maps as you type
 - [x] Review: All / Screenshots / Reels switch
-- [x] Map: category icon pins (one icon set used across the app); picking a city zooms past clustering
+- [x] Map: 9 place groups (Food & drink, Stay, Sights, Nature, Shopping, Activities, Transport, Cities & regions, Other) with one icon set on pins, filters, badges; picking a city zooms past clustering

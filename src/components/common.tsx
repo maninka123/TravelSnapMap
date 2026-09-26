@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { fileUrl } from "../api/services";
 import type { Place, PlaceCandidate } from "../api/types";
 import { CATEGORY, STATUS } from "../lib/labels";
-import { CategoryGlyph } from "../lib/categoryIcons";
+import { CategoryGlyph, colorOf } from "../lib/categoryIcons";
 
 export function Thumb({ path, alt = "", className = "", fallback }: { path?: string | null; alt?: string; className?: string; fallback?: ReactNode }) {
   const src = fileUrl(path);
@@ -17,7 +17,8 @@ export function Pill({ tone = "muted", children, title }: { tone?: string; child
 
 export function CategoryChip({ category }: { category: Place["category"] }) {
   const c = CATEGORY[category] ?? CATEGORY.other;
-  return <span className="chip" style={{ borderColor: c.color, color: c.color }}><CategoryGlyph category={category} size={12} /> {c.label}</span>;
+  const color = colorOf(category);
+  return <span className="chip" style={{ borderColor: color, color }}><CategoryGlyph category={category} size={12} /> {c.label}</span>;
 }
 
 export function PlaceLine({ place }: { place: Place }) {

@@ -3,13 +3,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AppService, PhotoLibraryService } from "../../api/services";
 import { ScanControls } from "../../components/ScanControls";
 import { PlaceService } from "../../api/services";
-import type { Place, PlaceCategory, PersonalStatus } from "../../api/types";
+import type { Place, PersonalStatus } from "../../api/types";
 import { Flag, Thumb } from "../../components/common";
 import { CATEGORY, STATUS } from "../../lib/labels";
 import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
 import { useAction, useLoad, useNav } from "../../lib/nav";
-import { CATEGORY_GLYPHS, CategoryBadge, CategoryGlyph, pinImage } from "../../lib/categoryIcons";
+import { CategoryBadge, CategoryGlyph, colorOf, GROUPS, groupOf, pinImage, type CategoryGroup } from "../../lib/categoryIcons";
 import { getMapStyleId, MAP_STYLES, resolveMapStyle, setMapStyleId, type MapStyleId } from "../../lib/mapStyle";
 
 /** Base-map labels that compete with your places: road names/shields, POIs, water lines, villages. */
@@ -29,7 +29,7 @@ export function MapView() {
   // The map shows verified places only; provisional ones wait in the Review inbox.
   const { data: loaded } = useLoad(() => PlaceService.list({ verifiedOnly: true }), []);
   const places = useMemo(() => loaded ?? [], [loaded]);
-  const [categories, setCategories] = useState<PlaceCategory[]>([]);
+  const [categories, setCategories] = useState<CategoryGroup[]>([]);
   const [statuses, setStatuses] = useState<PersonalStatus[]>([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Place>();
@@ -57,7 +57,7 @@ export function MapView() {
   // Drop filter choices that don't exist in the new country/city, so a hidden filter never empties the map.
   useEffect(() => {
     const keep = <T,>(list: T[], has: (v: T) => boolean) => (list.every(has) ? list : list.filter(has)); // same array when unchanged: no re-render
-    setCategories((c) => keep(c, (x) => scoped.some((p) => p.category === x)));
+    setCategories((c) => keep(c, (x) => scoped.some((p) => groupOf(p.category) === x)));
     setStatuses((st) => keep(st, (x) => scoped.some((p) => p.personalStatus === x)));
   }, [scoped]);
 
@@ -69,7 +69,7 @@ export function MapView() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return scoped.filter((p) =>
-      (categories.length === 0 || categories.includes(p.category)) &&
+      (categories.length === 0 || categories.includes(groupOf(p.category))) &&
       (statuses.length === 0 || statuses.includes(p.personalStatus)) &&
       (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q)));
   }, [scoped, categories, statuses, search]);
@@ -122,7 +122,7 @@ export function MapView() {
       quietBasemap(map);
       map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 50, clusterMaxZoom: CLUSTER_MAX_ZOOM });
       // Category pins (images are dropped whenever the style changes, so add them each time).
-      for (const c of Object.keys(CATEGORY_GLYPHS)) {
+      for (const c of Object.keys(GROUPS)) {
         if (!map.hasImage(`pin-${c}`)) map.addImage(`pin-${c}`, pinImage(c), { pixelRatio: 2 });
         if (!map.hasImage(`pin-sel-${c}`)) map.addImage(`pin-sel-${c}`, pinImage(c, true), { pixelRatio: 2 });
       }
@@ -364,8 +364,8 @@ class FitAllControl implements maplibregl.IControl {
 
 /** Status and kind of place, as toggles. Applies instantly. */
 function FiltersPopover({ places, categories, statuses, setCategories, setStatuses, onClose }: {
-  places: Place[]; categories: PlaceCategory[]; statuses: PersonalStatus[];
-  setCategories: (c: PlaceCategory[]) => void; setStatuses: (s: PersonalStatus[]) => void; onClose: () => void;
+  places: Place[]; categories: CategoryGroup[]; statuses: PersonalStatus[];
+  setCategories: (c: CategoryGroup[]) => void; setStatuses: (s: PersonalStatus[]) => void; onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -380,7 +380,7 @@ function FiltersPopover({ places, categories, statuses, setCategories, setStatus
     places.forEach((p) => m.set(key(p), (m.get(key(p)) ?? 0) + 1));
     return m;
   };
-  const byCat = count((p) => p.category);
+  const byCat = count((p) => groupOf(p.category));
   const byStatus = count((p) => p.personalStatus);
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   return (
@@ -400,7 +400,7 @@ function FiltersPopover({ places, categories, statuses, setCategories, setStatus
         <div className="filters-chips">
           {[...byCat.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => (
             <button key={c} className={`chip-btn ${categories.includes(c) ? "active" : ""}`} onClick={() => setCategories(toggle(categories, c))}>
-              <CategoryBadge category={c} size={18} /> {CATEGORY[c]?.label ?? c} <span className="chip-count">{n}</span>
+              <CategoryBadge category={c} size={18} /> {GROUPS[c].label} <span className="chip-count">{n}</span>
             </button>
           ))}
         </div>
@@ -489,7 +489,7 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
         <div className="map-preview-shade" />
         <button className="map-preview-close" onClick={onClose} aria-label="Close">✕</button>
         <div className="map-preview-title">
-          <span className="map-preview-kind" style={{ background: cat.color }}><CategoryGlyph category={place.category} size={12} strokeWidth={2.4} /> {cat.label}</span>
+          <span className="map-preview-kind" style={{ background: colorOf(place.category) }}><CategoryGlyph category={place.category} size={12} strokeWidth={2.4} /> {cat.label}</span>
           <h3>{place.canonicalName}</h3>
         </div>
       </div>
@@ -610,7 +610,7 @@ function toGeoJSON(places: Place[]): GeoJSON.FeatureCollection {
     features: places.map((p) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [p.longitude, p.latitude] },
-      properties: { id: p.id, name: p.canonicalName, category: CATEGORY_GLYPHS[p.category] ? p.category : "other", status: p.personalStatus },
+      properties: { id: p.id, name: p.canonicalName, category: groupOf(p.category), status: p.personalStatus },
     })),
   };
 }

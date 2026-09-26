@@ -31,8 +31,9 @@ export const CATEGORY_GLYPHS: Record<PlaceCategory, string[]> = {
   other: ["M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z", "M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],
 };
 
-const glyphs = (c: string) => CATEGORY_GLYPHS[c as PlaceCategory] ?? CATEGORY_GLYPHS.other;
-const colorOf = (c: string) => (CATEGORY[c as PlaceCategory] ?? CATEGORY.other).color;
+/** Accepts a place category or a group key; icon and colour always come from the group. */
+const glyphs = (c: string) => CATEGORY_GLYPHS[GROUPS[groupOf(c)].glyph];
+export const colorOf = (c: string) => GROUPS[groupOf(c)].color;
 
 /** The bare glyph, in the current text colour (for chips and inline use). */
 export function CategoryGlyph({ category, size = 14, strokeWidth = 2 }: { category: string; size?: number; strokeWidth?: number }) {
@@ -47,7 +48,7 @@ export function CategoryGlyph({ category, size = 14, strokeWidth = 2 }: { catego
 /** The glyph on a round badge in the category colour — the same look as the map pins. */
 export function CategoryBadge({ category, size = 28 }: { category: string; size?: number }) {
   return (
-    <span className="cat-badge" style={{ width: size, height: size, background: colorOf(category) }} title={(CATEGORY[category as PlaceCategory] ?? CATEGORY.other).label}>
+    <span className="cat-badge" style={{ width: size, height: size, background: colorOf(category) }} title={(CATEGORY[category as PlaceCategory] ?? GROUPS[groupOf(category)]).label}>
       <CategoryGlyph category={category} size={Math.round(size * 0.56)} strokeWidth={2.2} />
     </span>
   );
@@ -88,4 +89,27 @@ export function pinImage(category: string, selected = false): ImageData {
   for (const d of glyphs(category)) ctx.stroke(new Path2D(d));
   ctx.restore();
   return ctx.getImageData(0, 0, size, size);
+}
+
+/** The 9 groups shown in the app (map pins, filters, badges). Each place keeps its exact kind as a label. */
+export type CategoryGroup = "food" | "stay" | "sights" | "nature" | "shopping" | "activities" | "transport" | "areas" | "other";
+
+export const GROUPS: Record<CategoryGroup, { label: string; glyph: PlaceCategory; color: string; members: PlaceCategory[] }> = {
+  food: { label: "Food & drink", glyph: "restaurant", color: "#e03131", members: ["restaurant", "food", "cafe", "nightlife"] },
+  stay: { label: "Stay", glyph: "hotel", color: "#1c7ed6", members: ["hotel", "accommodation"] },
+  sights: { label: "Sights", glyph: "attraction", color: "#f08c00", members: ["attraction", "viewpoint", "museum", "historicSite", "temple", "religiousSite"] },
+  nature: { label: "Nature", glyph: "nature", color: "#2f9e44", members: ["nature", "beach", "hiking"] },
+  shopping: { label: "Shopping", glyph: "shopping", color: "#d6336c", members: ["shopping"] },
+  activities: { label: "Activities", glyph: "activity", color: "#0ca678", members: ["activity"] },
+  transport: { label: "Transport", glyph: "station", color: "#495057", members: ["transport", "airport", "station"] },
+  areas: { label: "Cities & regions", glyph: "city", color: "#3b5bdb", members: ["city", "region"] },
+  other: { label: "Other", glyph: "other", color: "#868e96", members: ["other"] },
+};
+
+const GROUP_OF = new Map<string, CategoryGroup>(
+  (Object.entries(GROUPS) as [CategoryGroup, (typeof GROUPS)[CategoryGroup]][]).flatMap(([g, def]) => def.members.map((m) => [m, g] as [string, CategoryGroup])),
+);
+
+export function groupOf(category: string): CategoryGroup {
+  return GROUP_OF.get(category) ?? (category in GROUPS ? (category as CategoryGroup) : "other");
 }
