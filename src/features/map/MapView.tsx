@@ -26,7 +26,8 @@ const CLUSTER = "#0f8a7e";
 export function MapView() {
   const nav = useNav();
   // The map shows verified places only; provisional ones wait in the Review inbox.
-  const { data: places = [] } = useLoad(() => PlaceService.list({ verifiedOnly: true }), []);
+  const { data: loaded } = useLoad(() => PlaceService.list({ verifiedOnly: true }), []);
+  const places = useMemo(() => loaded ?? [], [loaded]);
   const [categories, setCategories] = useState<PlaceCategory[]>([]);
   const [statuses, setStatuses] = useState<PersonalStatus[]>([]);
   const [search, setSearch] = useState("");
@@ -304,7 +305,8 @@ export function MapView() {
         )}
       </div>
 
-      {places.length === 0 && <Onboarding />}
+      {/* Only for a genuinely empty library — not while places are still loading. */}
+      {loaded && loaded.length === 0 && <Onboarding />}
 
       {selected && <MapPreview place={selected} onClose={() => setSelected(undefined)} onOpen={() => nav.openPlace(selected.id)} />}
       {adding && <QuickAddPlace onClose={() => setAdding(false)} />}

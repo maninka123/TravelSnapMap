@@ -5,7 +5,8 @@ import { CategoryChip, Empty, ErrorNote, Modal, PlaceLine, Thumb } from "../../c
 import { useAction, useLoad, useNav } from "../../lib/nav";
 
 export function TripsView() {
-  const { data: trips = [] } = useLoad(() => TripService.list(), []);
+  const { data: loadedTrips } = useLoad(() => TripService.list(), []);
+  const trips = loadedTrips ?? [];
   const [openId, setOpenId] = useState<string>();
   const [name, setName] = useState("");
   const action = useAction();
@@ -25,7 +26,7 @@ export function TripsView() {
         <input placeholder="New trip, e.g. Japan 2027" value={name} onChange={(e) => setName(e.target.value)} style={{ width: 280 }} />
         <button className="btn primary">Create trip</button>
       </form>
-      {trips.length === 0 ? <Empty icon="✈️" title="No trips yet">Group saved places into trips.</Empty> : (
+      {!loadedTrips ? null : trips.length === 0 ? <Empty icon="✈️" title="No trips yet">Group saved places into trips.</Empty> : (
         <div className="grid">
           {trips.map((t) => (
             <div key={t.id} className="tile" onClick={() => setOpenId(t.id)}>

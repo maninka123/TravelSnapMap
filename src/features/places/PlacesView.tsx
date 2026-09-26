@@ -11,7 +11,8 @@ export function PlacesView() {
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   const [filter, setFilter] = useState<PlaceFilter>({ sort: "recent" });
   const [adding, setAdding] = useState(false);
-  const { data: places = [], error } = useLoad(() => PlaceService.list(filter), [JSON.stringify(filter)]);
+  const { data: loaded, error } = useLoad(() => PlaceService.list(filter), [JSON.stringify(filter)]);
+  const places = useMemo(() => loaded ?? [], [loaded]);
   const { data: all = [] } = useLoad(() => PlaceService.list({}), []);
   const { data: warnings = {} } = useLoad(() => PlaceService.warnings(), []);
 
@@ -87,7 +88,7 @@ export function PlacesView() {
       </div>
 
       {error && <p className="bad">{error}</p>}
-      {places.length === 0 ? (
+      {!loaded ? null : places.length === 0 ? (
         filter.search ? <Empty icon="🔎" title="No matches">No saved place matches “{filter.search}”.</Empty> :
         <Empty icon="📍" title="No places yet">Scan your screenshots, import a Reel from Sources, or add a place you know with ＋ Add Place.</Empty>
       ) : layout === "grid" ? (
