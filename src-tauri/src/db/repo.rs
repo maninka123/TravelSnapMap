@@ -186,20 +186,37 @@ impl Database {
         })
     }
 
-    pub fn list_screenshots(&self, f: &ScreenshotFilter) -> Result<Vec<ScreenshotRecord>> {
-        let condition = match f.view.as_deref().unwrap_or("all") {
+    /// The WHERE clause for a Sources view. Every screenshot is in exactly one of Travel / Not travel /
+    /// Failed / Ignored (Needs review is part of Travel), so the tabs add up to the library total.
+    fn view_condition(view: &str) -> &'static str {
+        match view {
             "processed" => "s.status = 'complete'",
             "needsReview" => "s.status = 'needsReview'",
             "multiplePlaces" => "(SELECT COUNT(*) FROM place_screenshots ps WHERE ps.screenshot_id = s.id) > 1",
-            "noPlace" => "(s.classification = 'travel' OR s.user_classification = 'travel') AND s.status != 'ignored' AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.screenshot_id = s.id)",
-            "lowConfidence" => "s.classification IN ('travel','uncertain') AND s.travel_confidence < 0.8 AND s.status != 'ignored'",
+            "noPlace" => "(s.classification = 'travel' OR s.user_classification = 'travel') AND s.status NOT IN ('ignored','notTravel') AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.screenshot_id = s.id)",
+            "lowConfidence" => "s.classification IN ('travel','uncertain') AND s.travel_confidence < 0.8 AND s.status NOT IN ('ignored','notTravel')",
             "ignored" => "s.status = 'ignored'",
             "notTravel" => "s.status = 'notTravel'",
             "failed" => "s.status = 'failed'",
             "pending" => "s.status NOT IN ('complete','notTravel','needsReview','ignored','failed')",
             "everything" => "s.status != 'ignored'",
-            _ => "(s.classification IN ('travel','uncertain') OR s.user_classification = 'travel') AND s.status != 'ignored'",
-        };
+            // Travel: kept as travel (or still being processed), never ones the AI ruled out.
+            _ => "((s.classification IN ('travel','uncertain') AND s.status NOT IN ('notTravel','failed')) OR s.user_classification = 'travel') AND s.status != 'ignored'",
+        }
+    }
+
+    pub fn count_screenshots(&self, f: &ScreenshotFilter) -> Result<i64> {
+        let condition = Self::view_condition(f.view.as_deref().unwrap_or("all"));
+        let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));
+        let sql = format!(
+            "SELECT COUNT(*) FROM screenshots s WHERE {condition} \
+             AND (?1 IS NULL OR s.ocr_full_text LIKE ?1 OR s.creator LIKE ?1 OR s.source_type LIKE ?1)"
+        );
+        Ok(self.with(|c| c.query_row(&sql, params![search], |r| r.get(0)))?)
+    }
+
+    pub fn list_screenshots(&self, f: &ScreenshotFilter) -> Result<Vec<ScreenshotRecord>> {
+        let condition = Self::view_condition(f.view.as_deref().unwrap_or("all"));
         let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));
         let sql = format!(
             "SELECT {SCREENSHOT_COLUMNS} FROM screenshots s WHERE {condition} \

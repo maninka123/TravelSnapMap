@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { LibraryService, ProcessingService } from "../../api/services";
+import { useEffect, useState } from "react";
+import { LibraryService, ProcessingService, ScreenshotService } from "../../api/services";
 import type { ScreenshotView } from "../../api/types";
 import { Empty, Pill, Thumb } from "../../components/common";
 import { formatDate, formatTime, PROCESSING, SOURCE } from "../../lib/labels";
@@ -32,7 +32,19 @@ export function SourcesView() {
   const [search, setSearch] = useState("");
   const [importing, setImporting] = useState(false);
   const action = useAction();
-  const { data: items = [], error } = useLoad(() => LibraryService.items(view, search), [view, search]);
+  const PAGE = 300;
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [view, search]);
+  const { data: items = [], error } = useLoad(() => LibraryService.items(view, search, limit), [view, search, limit]);
+  // True totals, so the tabs add up to the whole library (Needs review is part of Travel).
+  const { data: counts } = useLoad(async () => {
+    const [travel, needsReview, notTravel, current] = await Promise.all([
+      ScreenshotService.count("all", search), ScreenshotService.count("needsReview", search),
+      ScreenshotService.count("notTravel", search), ScreenshotService.count(view, search),
+    ]);
+    return { all: travel, needsReview, notTravel, current } as Record<string, number>;
+  }, [view, search]);
+  const shownShots = items.filter((i) => i.kind === "screenshot").length;
   const shown = items.filter((i) => kind === "all" || i.kind === kind);
   // The viewer steps through exactly what's shown here, in this order.
   const list = shown.map((i) => (i.kind === "reel" ? { type: "reel" as const, id: i.reel.id } : { type: "screenshot" as const, id: i.screenshot.id }));
@@ -58,7 +70,9 @@ export function SourcesView() {
         <input style={{ width: 280 }} placeholder="Search text, captions, transcripts, creators…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="segmented">
           {PRIMARY.map((v) => (
-            <button key={v.key} className={view === v.key ? "active" : ""} onClick={() => setView(v.key)}>{v.label}</button>
+            <button key={v.key} className={view === v.key ? "active" : ""} onClick={() => setView(v.key)}>
+              {v.label}{counts?.[v.key] !== undefined && <span className="tab-count">{counts[v.key].toLocaleString()}</span>}
+            </button>
           ))}
         </div>
         <details className="menu filter-more" key={view}>
@@ -122,6 +136,13 @@ export function SourcesView() {
               </div>
             );
           })}
+        </div>
+      )}
+      {kind !== "reel" && counts && counts.current > shownShots && (
+        <div className="show-more">
+          <span className="muted small">Showing {shownShots.toLocaleString()} of {counts.current.toLocaleString()} screenshots</span>
+          <button className="btn" onClick={() => setLimit((n) => n + PAGE)}>Show more</button>
+          <button className="btn ghost" onClick={() => setLimit(counts.current)}>Show all</button>
         </div>
       )}
       {importing && <ImportReelDialog onClose={() => setImporting(false)} />}

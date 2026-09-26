@@ -752,6 +752,12 @@ pub async fn remove_memory(state: State<'_, AppState>, id: String) -> CmdResult<
     state.db.delete_memory(&id).map_err(err)
 }
 
+/// How many screenshots a Sources view holds (for tab counts and "Showing 300 of 1,421").
+#[tauri::command]
+pub async fn count_screenshots(state: State<'_, AppState>, filter: Option<ScreenshotFilter>) -> CmdResult<i64> {
+    state.db.count_screenshots(&filter.unwrap_or_default()).map_err(err)
+}
+
 // MARK: Editing processed results (your edits are kept when something is reprocessed)
 
 /// Edits a saved tip/fact. It becomes yours (origin "user"), so reprocessing never overwrites it.

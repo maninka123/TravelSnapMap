@@ -85,8 +85,9 @@ export const MemoryService = {
 export type { Memory };
 
 export const ScreenshotService = {
-  list: (view: ScreenshotView, search?: string, limit = 400) =>
+  list: (view: ScreenshotView, search?: string, limit = 300) =>
     invoke<Screenshot[]>("list_screenshots", { filter: { view, search: search || null, limit } }),
+  count: (view: ScreenshotView, search?: string) => invoke<number>("count_screenshots", { filter: { view, search: search || null } }),
   detail: (id: string) => invoke<ScreenshotDetail>("get_screenshot_detail", { id }),
   action: (id: string, action: "reprocess" | "ignore" | "markTravel" | "markNotTravel") =>
     invoke<void>("screenshot_action", { id, action }),
@@ -144,9 +145,9 @@ export const ReelService = {
 
 export const LibraryService = {
   /** Screenshots and Reels together, newest first. */
-  items: async (view: ScreenshotView, search?: string): Promise<LibraryItem[]> => {
+  items: async (view: ScreenshotView, search?: string, limit = 300): Promise<LibraryItem[]> => {
     const [shots, reels] = await Promise.all([
-      ScreenshotService.list(view, search),
+      ScreenshotService.list(view, search, limit),
       view === "all" || view === "everything" || view === "needsReview" || view === "processed" || view === "failed" || view === "ignored"
         ? ReelService.list() : Promise.resolve([] as Reel[]),
     ]);
