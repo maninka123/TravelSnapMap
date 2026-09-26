@@ -58,7 +58,7 @@ function Shell() {
           ))}
         </nav>
         <div className="sidebar-foot muted small">
-          {overview && <>{overview.places} places · {overview.model}</>}
+          {overview && <>{overview.places} places</>}
         </div>
       </aside>
 
