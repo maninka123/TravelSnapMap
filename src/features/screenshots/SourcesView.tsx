@@ -6,17 +6,21 @@ import { formatDate, formatTime, PROCESSING, SOURCE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { ImportReelDialog } from "../reels/ImportReelDialog";
 import { ScanControls } from "../../components/ScanControls";
+import { LibraryProgress } from "../../components/LibraryProgress";
 
-const VIEWS: { key: ScreenshotView; label: string }[] = [
-  { key: "all", label: "All travel" },
-  { key: "processed", label: "Processed" },
+// The three filters people actually use; the rest live one level deeper under "More".
+const PRIMARY: { key: ScreenshotView; label: string }[] = [
+  { key: "all", label: "Travel" },
   { key: "needsReview", label: "Needs review" },
+  { key: "notTravel", label: "Not travel" },
+];
+const MORE: { key: ScreenshotView; label: string }[] = [
+  { key: "processed", label: "Processed" },
   { key: "multiplePlaces", label: "Multiple places" },
   { key: "noPlace", label: "No place found" },
   { key: "lowConfidence", label: "Low confidence" },
   { key: "pending", label: "Pending" },
   { key: "failed", label: "Failed" },
-  { key: "notTravel", label: "Not travel" },
   { key: "ignored", label: "Ignored" },
 ];
 
@@ -46,11 +50,25 @@ export function SourcesView() {
         <button className="btn" onClick={() => setImporting(true)}>🎬 Import Reels</button>
       </div>
 
+      <LibraryProgress />
+
       <div className="toolbar">
         <input style={{ width: 280 }} placeholder="Search text, captions, transcripts, creators…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        {VIEWS.map((v) => (
-          <button key={v.key} className={`chip-btn ${view === v.key ? "active" : ""}`} onClick={() => setView(v.key)}>{v.label}</button>
-        ))}
+        <div className="segmented">
+          {PRIMARY.map((v) => (
+            <button key={v.key} className={view === v.key ? "active" : ""} onClick={() => setView(v.key)}>{v.label}</button>
+          ))}
+        </div>
+        <details className="menu filter-more" key={view}>
+          <summary className={`chip-btn ${MORE.some((m) => m.key === view) ? "active" : ""}`}>
+            {MORE.find((m) => m.key === view)?.label ?? "More"} ▾
+          </summary>
+          <div className="menu-items card" style={{ left: 0, right: "auto" }}>
+            {MORE.map((m) => (
+              <button key={m.key} className="btn ghost" onClick={() => setView(m.key)}>{m.label}</button>
+            ))}
+          </div>
+        </details>
         {(view === "failed" || view === "needsReview") && shown.length > 0 && (
           <button className="btn small" onClick={() => action.run(() => ProcessingService.reprocess(view === "failed" ? "failed" : "needsReview"))}>
             Reprocess all

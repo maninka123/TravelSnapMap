@@ -404,3 +404,16 @@ audio { width: 100%; }
 .flag.fi { line-height: 1; }
 .flag-unknown { background: var(--fill-strong); }
 @media (prefers-color-scheme: dark) { .flag { box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.22); } }
+
+/* Library progress: one quiet line above the filters */
+.library-progress {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px 16px;
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-s); padding: 10px 14px; margin-bottom: 14px;
+}
+.lp-bar { height: 6px; background: var(--fill); border-radius: 3px; overflow: hidden; min-width: 80px; }
+.lp-bar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width 400ms var(--ease-out); }
+.lp-actions { display: flex; gap: 6px; align-items: center; }
+.library-progress .error-note { grid-column: 1 / -1; }
+.filter-more summary { list-style: none; }
+.filter-more summary::-webkit-details-marker { display: none; }
+@media (max-width: 760px) { .library-progress { grid-template-columns: 1fr; } }
