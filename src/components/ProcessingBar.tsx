@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { ProcessingService } from "../api/services";
+import { AppService, ProcessingService } from "../api/services";
 import type { QueueSnapshot } from "../api/types";
-import { useNav } from "../lib/nav";
+import { useLoad, useNav } from "../lib/nav";
+
+const DONE = ["complete", "notTravel", "needsReview", "ignored"];
 
 /** Always-visible progress for the background pipeline. Never blocks the UI. */
 export function ProcessingBar() {
   const { refresh } = useNav();
   const [snap, setSnap] = useState<QueueSnapshot>();
   const lastRefresh = useRef(0);
+  // Whole-library progress (refreshed every ~2 s while processing), so the bar continues from where you are.
+  const { data: overview } = useLoad(() => AppService.overview(), []);
 
   useEffect(() => {
     ProcessingService.status().then(setSnap).catch(() => {});
@@ -24,7 +28,10 @@ export function ProcessingBar() {
   }, [refresh]);
 
   if (!snap || (!snap.running && snap.total === 0 && !snap.lastError)) return null;
-  const pct = snap.total ? Math.round((snap.processed / snap.total) * 100) : 0;
+  const counts = overview?.screenshotCounts ?? {};
+  const libraryTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+  const libraryDone = DONE.reduce((n, k) => n + (counts[k] ?? 0), 0);
+  const pct = libraryTotal ? Math.round((libraryDone / libraryTotal) * 100) : snap.total ? Math.round((snap.processed / snap.total) * 100) : 0;
 
   return (
     <div className="processing-bar">
@@ -33,19 +40,16 @@ export function ProcessingBar() {
           {snap.running ? (snap.paused ? "⏸ Paused" : "⏳ Scanning screenshots") : snap.lastError ? "⚠️ " + snap.lastError : "✓ " + snap.phase}
         </div>
         <div className="pb-stats">
-          <span className="strong">{snap.processed.toLocaleString()} of {snap.total.toLocaleString()} done{snap.running ? ` · ${snap.remaining.toLocaleString()} left` : ""}</span>
-          {snap.processed > 0 && (
-            <span>
-              {snap.travel} travel{snap.needsReview > 0 ? ` (${snap.needsReview} to review)` : ""} · {snap.notTravel} not travel
-              {snap.failed > 0 && <span className="bad"> · {snap.failed} failed</span>}
-              {snap.waiting > 0 && <> · {snap.waiting} waiting for iCloud</>}
-            </span>
-          )}
+          <span className="strong">
+            {libraryTotal ? `${libraryDone.toLocaleString()} of ${libraryTotal.toLocaleString()} screenshots done · ${pct}%` : `${snap.processed} of ${snap.total} done`}
+          </span>
         </div>
-        {snap.running && snap.total > snap.newlyDiscovered && (
+        {snap.total > 0 && (
           <div className="pb-note">
-            {snap.newlyDiscovered > 0 ? `${snap.newlyDiscovered.toLocaleString()} new + ` : ""}
-            {(snap.total - snap.newlyDiscovered).toLocaleString()} left from earlier · done ones skipped
+            This run: {snap.processed.toLocaleString()} of {snap.total.toLocaleString()}
+            {snap.processed > 0 && <> · {snap.travel} travel{snap.needsReview > 0 ? ` (${snap.needsReview} to review)` : ""} · {snap.notTravel} not travel</>}
+            {snap.failed > 0 && <span className="bad"> · {snap.failed} failed</span>}
+            {snap.waiting > 0 && <> · {snap.waiting} waiting for iCloud</>}
           </div>
         )}
         {snap.running && <div className="progress"><div style={{ width: `${pct}%` }} /></div>}
