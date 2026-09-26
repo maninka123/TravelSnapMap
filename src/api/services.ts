@@ -2,7 +2,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
-  AppConfig, Diagnostics, LibraryItem, PhotoVideo, ReelDetail, Reel, RunMode, RunRecord, RunReport, ScanPreview, SpeechLocale, Overview, PlaceCandidate, PlaceDetail, PlaceFilter, Place, QueueSnapshot, Rect,
+  AppConfig, CostSummary, Diagnostics, Pricing, LibraryItem, PhotoVideo, ReelDetail, Reel, RunMode, RunRecord, RunReport, ScanPreview, SpeechLocale, Overview, PlaceCandidate, PlaceDetail, PlaceFilter, Place, QueueSnapshot, Rect,
   ReviewEntry, Screenshot, ScreenshotDetail, ScreenshotView, Settings, Trip, TripEntry,
 } from "./types";
 
@@ -17,6 +17,7 @@ export function fileUrl(path: string | null | undefined): string | undefined {
 export const AppService = {
   overview: () => invoke<Overview>("get_overview"),
   diagnostics: () => invoke<Diagnostics>("diagnostics"),
+  costSummary: (pricing: Pricing) => invoke<CostSummary>("cost_summary", { pricing }),
   onLibraryChanged: (cb: () => void): Promise<UnlistenFn> => listen("library-changed", cb),
   /** Fired when background work (e.g. Reel import) changes stored data. */
   onDataChanged: (cb: () => void): Promise<UnlistenFn> => listen("data-changed", cb),

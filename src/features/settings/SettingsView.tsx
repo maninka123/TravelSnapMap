@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppService, PhotoLibraryService, ProcessingService, ReelService, SettingsService } from "../../api/services";
-import type { AppConfig, RunReport } from "../../api/types";
+import type { AppConfig, CostSummary, RunReport } from "../../api/types";
 import { ErrorNote, Modal } from "../../components/common";
 import { RunReportView, TestRunDialog } from "../../components/ScanControls";
 import { BackupCard } from "./BackupCard";
@@ -14,9 +14,11 @@ export function SettingsView() {
   const { data: tools } = useLoad(() => ReelService.toolStatus(), []);
   const { data: locales = [] } = useLoad(() => ReelService.speechLocales(), []);
   const { data: runs = [] } = useLoad(() => ProcessingService.runs(), []);
+  const [config, setConfig] = useState<AppConfig>();
+  const pricingKey = JSON.stringify(config?.pricing ?? null);
+  const { data: cost } = useLoad(async () => (config ? AppService.costSummary(config.pricing) : undefined), [pricingKey]);
   const [runReport, setRunReport] = useState<RunReport>();
   const [testing, setTesting] = useState(false);
-  const [config, setConfig] = useState<AppConfig>();
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
   const action = useAction();
@@ -142,6 +144,7 @@ export function SettingsView() {
             An estimate only — DeepSeek bills from its own records. Token counts are stored exactly; estimates are
             recalculated when you change these prices. Defaults: {config.pricing.source}.
           </p>
+          {cost && <CostSummaryView cost={cost} mode={config.pricing.mode} />}
           <div className="field"><label>Pricing</label>
             <select value={config.pricing.mode} onChange={(e) => set("pricing", { ...config.pricing, mode: e.target.value as typeof config.pricing.mode })}>
               <option value="timeOfDay">By time of day (peak Mon–Fri {config.pricing.peakHoursUtc.map(([s, e]) => `${s}:00–${e}:00`).join(", ")} UTC)</option>
@@ -239,4 +242,47 @@ function timings(metrics: [string, number][]): [string, string][] {
     }
   }
   return out;
+}
+
+const usd = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
+
+/** Spend so far under the prices below, plus what the same tokens cost under each option and a projection. */
+function CostSummaryView({ cost, mode }: { cost: CostSummary; mode: string }) {
+  const options = [
+    ["timeOfDay", "By time of day", cost.byTimeOfDay],
+    ["peak", "Always peak", cost.alwaysPeak],
+    ["offPeak", "Always off-peak", cost.alwaysOffPeak],
+  ] as const;
+  const parts = [["Screenshots", cost.screenshots], ["Reels", cost.reels], ["Trip summaries", cost.other]].filter(([, v]) => (v as number) > 0);
+  return (
+    <div className="cost-summary">
+      <div className="cost-hero">
+        <div>
+          <div className="stat-value">{usd(cost.total)}</div>
+          <div className="stat-label">spent so far · {cost.requests.toLocaleString()} AI requests
+            {cost.requests > 0 && ` (${Math.round((cost.peakRequests / cost.requests) * 100)}% in peak hours)`}</div>
+        </div>
+        {cost.screenshotsProcessed > 0 && (
+          <div>
+            <div className="stat-value">{usd(cost.per100Screenshots)}</div>
+            <div className="stat-label">per 100 screenshots</div>
+          </div>
+        )}
+        {cost.screenshotsRemaining > 0 && cost.screenshotsProcessed > 0 && (
+          <div>
+            <div className="stat-value">≈ {usd(cost.projectedRemaining)}</div>
+            <div className="stat-label">to finish {cost.screenshotsRemaining.toLocaleString()} remaining</div>
+          </div>
+        )}
+      </div>
+      {parts.length > 1 && <div className="muted small">{parts.map(([l, v]) => `${l} ${usd(v as number)}`).join(" · ")}</div>}
+      <div className="cost-options">
+        {options.map(([key, label, value]) => (
+          <div key={key} className={`cost-option ${mode === key ? "active" : ""}`}>
+            <span>{label}</span><strong>{usd(value)}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

@@ -282,3 +282,68 @@ impl Database {
         Ok(n)
     }
 }
+
+/// What the stored AI usage costs under a given pricing (possibly unsaved), for the Settings cost card.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostSummary {
+    /// Under the pricing's chosen mode.
+    pub total: f64,
+    /// The same tokens under each mode, so the options can be compared.
+    pub by_time_of_day: f64,
+    pub always_peak: f64,
+    pub always_off_peak: f64,
+    pub screenshots: f64,
+    pub reels: f64,
+    pub other: f64,
+    pub requests: i64,
+    pub peak_requests: i64,
+    pub screenshots_processed: i64,
+    pub screenshots_remaining: i64,
+    pub per_100_screenshots: f64,
+    pub projected_remaining: f64,
+}
+
+impl Database {
+    pub fn cost_summary(&self, pricing: &crate::config::Pricing) -> Result<CostSummary> {
+        use chrono::{DateTime, Utc};
+        let parse = |s: &str| DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now());
+        let with_mode = |mode: &str| crate::config::Pricing { mode: mode.into(), ..pricing.clone() };
+        let (tod, peak, off) = (with_mode("timeOfDay"), with_mode("peak"), with_mode("offPeak"));
+        self.with(|c| {
+            let mut s = CostSummary {
+                total: 0.0, by_time_of_day: 0.0, always_peak: 0.0, always_off_peak: 0.0, screenshots: 0.0, reels: 0.0,
+                other: 0.0, requests: 0, peak_requests: 0, screenshots_processed: 0, screenshots_remaining: 0,
+                per_100_screenshots: 0.0, projected_remaining: 0.0,
+            };
+            let mut stmt = c.prepare("SELECT kind, input_tokens, cache_hit_tokens, output_tokens, created_at FROM ai_usage_log")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)))?;
+            for row in rows {
+                let (kind, input, hit, output, at) = row?;
+                let (miss, hit, output, at) = ((input - hit).max(0) as u64, hit.max(0) as u64, output.max(0) as u64, parse(&at));
+                let cost = pricing.estimate(miss, hit, output, at);
+                s.total += cost;
+                s.by_time_of_day += tod.estimate(miss, hit, output, at);
+                s.always_peak += peak.estimate(miss, hit, output, at);
+                s.always_off_peak += off.estimate(miss, hit, output, at);
+                match kind.as_str() {
+                    "extraction" | "region" => s.screenshots += cost,
+                    "reel" => s.reels += cost,
+                    _ => s.other += cost,
+                }
+                s.requests += 1;
+                if tod.is_peak(at) { s.peak_requests += 1; }
+            }
+            s.screenshots_processed = c.query_row(
+                "SELECT COUNT(*) FROM screenshots WHERE status IN ('complete','notTravel','needsReview','ignored')", [], |r| r.get(0))?;
+            s.screenshots_remaining = c.query_row(
+                "SELECT COUNT(*) FROM screenshots WHERE status NOT IN ('complete','notTravel','needsReview','ignored')", [], |r| r.get(0))?;
+            if s.screenshots_processed > 0 {
+                let each = s.screenshots / s.screenshots_processed as f64;
+                s.per_100_screenshots = each * 100.0;
+                s.projected_remaining = each * s.screenshots_remaining as f64;
+            }
+            Ok(s)
+        })
+    }
+}

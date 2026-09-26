@@ -468,3 +468,20 @@ export interface Pricing {
   peakHoursUtc: [number, number][];
   source: string;
 }
+
+/** Estimated AI spend so far under a pricing setting, with every mode for comparison. */
+export interface CostSummary {
+  total: number;
+  byTimeOfDay: number;
+  alwaysPeak: number;
+  alwaysOffPeak: number;
+  screenshots: number;
+  reels: number;
+  other: number;
+  requests: number;
+  peakRequests: number;
+  screenshotsProcessed: number;
+  screenshotsRemaining: number;
+  per100Screenshots: number;
+  projectedRemaining: number;
+}

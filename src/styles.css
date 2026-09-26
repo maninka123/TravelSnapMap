@@ -418,3 +418,9 @@ audio { width: 100%; }
 .filter-more summary::-webkit-details-marker { display: none; }
 @media (max-width: 760px) { .library-progress { grid-template-columns: 1fr; } }
 .test-run-card { display: flex; gap: 14px; align-items: center; }
+.cost-summary { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+.cost-hero { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+.cost-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.cost-option { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--fill); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cost-option strong { color: var(--text); }
+.cost-option.active { outline: 2px solid var(--accent); color: var(--text); }

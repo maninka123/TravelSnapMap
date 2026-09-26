@@ -16,7 +16,7 @@ use crate::config::AppConfig;
 use crate::services::ai::types::AiUsage;
 pub use records::*;
 pub use reels_repo::FactProvenance;
-pub use runs_repo::{RunRecord, RunReport};
+pub use runs_repo::{CostSummary, RunRecord, RunReport};
 pub use repo::{PlaceFilter, ScreenshotFilter};
 
 pub fn now() -> String {

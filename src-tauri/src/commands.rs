@@ -412,6 +412,12 @@ pub async fn save_api_key(state: State<'_, AppState>, key: Option<String>) -> Cm
     rebuild_ai(&state, state.pipeline.config())
 }
 
+/// Estimated spend so far under `pricing` (the Settings form, saved or not), with each mode for comparison.
+#[tauri::command]
+pub async fn cost_summary(state: State<'_, AppState>, pricing: crate::config::Pricing) -> CmdResult<crate::db::CostSummary> {
+    state.db.cost_summary(&pricing).map_err(err)
+}
+
 #[tauri::command]
 pub async fn diagnostics(state: State<'_, AppState>) -> CmdResult<Diagnostics> {
     state.db.diagnostics().map_err(err)

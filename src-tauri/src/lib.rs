@@ -223,6 +223,7 @@ pub fn run() {
             commands::save_settings,
             commands::save_api_key,
             commands::diagnostics,
+            commands::cost_summary,
             commands::list_reels,
             commands::get_reel_detail,
             commands::import_reel,
