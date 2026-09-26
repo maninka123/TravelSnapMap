@@ -9,14 +9,7 @@ import { CATEGORY, STATUS } from "../../lib/labels";
 import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
 import { useLoad, useNav } from "../../lib/nav";
-
-const prefersDark = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-
-/**
- * Quiet vector basemap (no API key) so your saved places stand out: OpenFreeMap Positron, or its dark
- * counterpart in dark mode. Swap the style URL to change providers.
- */
-export const MAP_STYLE = `https://tiles.openfreemap.org/styles/${prefersDark() ? "dark" : "positron"}`;
+import { getMapStyleId, MAP_STYLES, resolveMapStyle, setMapStyleId, type MapStyleId } from "../../lib/mapStyle";
 
 /** Base-map labels that compete with your places: road names/shields, POIs, water lines, villages. */
 const NOISY_LABELS = /^(highway-name|highway-shield|road_shield|road-shield|waterway|water_name_line|airport|poi|label_other|label_village)/;
@@ -44,6 +37,10 @@ export function MapView() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [areaOpen, setAreaOpen] = useState(() => { try { return localStorage.getItem("map.areaOpen") === "1"; } catch { return false; } });
   const [bounds, setBounds] = useState<LngLatBounds>();
+  const [styleId, setStyleId] = useState<MapStyleId>(getMapStyleId);
+  const [styleMenu, setStyleMenu] = useState(false);
+  const selectedRef = useRef<string>("");
+  const appliedStyle = useRef(resolveMapStyle(getMapStyleId()).url);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | undefined>(undefined);
@@ -83,14 +80,15 @@ export function MapView() {
   // Create the map once.
   useEffect(() => {
     if (!containerRef.current) return;
-    const dark = prefersDark();
-    const map = new maplibregl.Map({ container: containerRef.current, style: MAP_STYLE, center: [20, 25], zoom: 1.4, attributionControl: { compact: true } });
+    const map = new maplibregl.Map({ container: containerRef.current, style: resolveMapStyle().url, center: [20, 25], zoom: 1.4, attributionControl: { compact: true } });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-left");
     map.addControl(new FitAllControl(() => fit(map, placesRef.current)), "bottom-left");
     mapRef.current = map;
     const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 18, className: "map-hover" });
 
-    map.on("load", () => {
+    // Runs for the first style and again whenever you pick another map style (setStyle drops custom layers).
+    map.on("style.load", () => {
+      const dark = resolveMapStyle(getMapStyleId()).dark;
       quietBasemap(map);
       map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 50, clusterMaxZoom: 13 });
       // Clusters: size by count (1–4 · 5–14 · 15–29 · 30+) with a soft translucent ring.
@@ -133,6 +131,12 @@ export function MapView() {
         layout: { "text-field": ["get", "name"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top", "text-font": ["Noto Sans Bold"], "text-max-width": 10 },
         paint: { "text-color": dark ? "#f2f2f7" : "#1c1c1e", "text-halo-color": dark ? "#1c1c1e" : "#ffffff", "text-halo-width": 1.6 },
       });
+      const sel = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selectedRef.current]] as maplibregl.FilterSpecification;
+      map.setFilter("place-selected", sel);
+      map.setFilter("place-selected-shadow", sel);
+    });
+
+    map.on("load", () => {
 
       map.on("click", "clusters", async (e) => {
         const feature = map.queryRenderedFeatures(e.point, { layers: ["clusters"] })[0];
@@ -168,8 +172,17 @@ export function MapView() {
     source?.setData(toGeoJSON(filtered));
   }, [filtered]);
 
+  // Switch base map; the choice is remembered for next time.
+  useEffect(() => {
+    setMapStyleId(styleId);
+    const url = resolveMapStyle(styleId).url;
+    if (mapRef.current && appliedStyle.current !== url) mapRef.current.setStyle(url, { diff: false });
+    appliedStyle.current = url;
+  }, [styleId]);
+
   // Highlight the selected pin.
   useEffect(() => {
+    selectedRef.current = selected?.id ?? "";
     const map = mapRef.current;
     if (!map?.getLayer("place-selected")) return;
     const filter = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selected?.id ?? ""]] as maplibregl.FilterSpecification;
@@ -243,10 +256,54 @@ export function MapView() {
           onClose={() => setAreaOpen(false)} onFitAll={fitAll} />}
       </div>
 
+      <div className="map-style-wrap">
+        <button className={`map-style-btn ${styleMenu ? "is-on" : ""}`} onClick={() => setStyleMenu((o) => !o)} aria-haspopup="menu" aria-expanded={styleMenu} title="Map style">
+          <LayersIcon /> {MAP_STYLES.find((s) => s.id === styleId)?.label}
+        </button>
+        {styleMenu && (
+          <MapStyleMenu value={styleId} onClose={() => setStyleMenu(false)} onPick={(id) => { setStyleId(id); setStyleMenu(false); }} />
+        )}
+      </div>
+
       {places.length === 0 && <Onboarding />}
 
       {selected && <MapPreview place={selected} onClose={() => setSelected(undefined)} onOpen={() => nav.openPlace(selected.id)} />}
       {adding && <QuickAddPlace onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+function LayersIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 1.8 1.6 5.2 8 8.6l6.4-3.4L8 1.8Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M1.6 8.2 8 11.6l6.4-3.4M1.6 11 8 14.4l6.4-3.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Map style menu (anchored to its button, top-right). */
+function MapStyleMenu({ value, onPick, onClose }: { value: MapStyleId; onPick: (id: MapStyleId) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const away = (e: MouseEvent) => { if (ref.current && !ref.current.parentElement?.contains(e.target as Node)) onClose(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+  }, [onClose]);
+  return (
+    <div className="map-style-menu" role="menu" ref={ref}>
+      {MAP_STYLES.map((s) => (
+        <button key={s.id} role="menuitemradio" aria-checked={value === s.id} className={`map-style-item ${value === s.id ? "active" : ""}`} onClick={() => onPick(s.id)}>
+          <span className={`style-swatch swatch-${s.id}`} />
+          <span className="grow">
+            <span className="map-style-name">{s.label}</span>
+            <span className="map-style-hint">{s.hint}</span>
+          </span>
+          <span className="map-style-check">{value === s.id ? "✓" : ""}</span>
+        </button>
+      ))}
     </div>
   );
 }

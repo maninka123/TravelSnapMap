@@ -100,3 +100,5 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Settings: cost summary on top, standard prices automatic (custom under Advanced), grouped colour-coded diagnostics
 - [x] Map preview card redesigned (photo with title, category, status, Apple Maps button)
 - [x] Map redesign: quiet basemap (Positron/Dark, minor labels hidden), Filters popover, “In view” panel grouped by country → city, sized clusters with ring + hover, category pins with selected state, Fit-all control; country chip row removed
+- [x] Map style picker (Light · Bright · Colourful · Dark · Blue · Match system), remembered; Light by default
+- [x] Apple-design pass on the newer UI: Reduce Motion/Transparency for all popovers, instant press feedback on rows, no fake press on non-buttons
