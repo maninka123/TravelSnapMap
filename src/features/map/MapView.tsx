@@ -442,8 +442,8 @@ function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll, onCount
           <div className="strong">{places.length} saved place{places.length === 1 ? "" : "s"} in view</div>
           <div className="muted small">{byCountry ? `${groups.length} countries — pick one to zoom in` : "Grouped by city"}</div>
         </div>
-        <button className="icon-btn small" title="Fit all places" onClick={onFitAll}>⌖</button>
-        <button className="icon-btn small" aria-label="Close" onClick={onClose}>✕</button>
+        <button className="close-btn small" title="Fit all places" onClick={onFitAll}>⌖</button>
+        <button className="close-btn small" aria-label="Close" onClick={onClose}>✕</button>
       </div>
       <div className="area-list">
         {places.length === 0 && <p className="muted small area-empty">No saved places here. Zoom out or press ⌖ to see them all.</p>}

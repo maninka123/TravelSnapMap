@@ -45,7 +45,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
       <div className={`modal ${wide ? "modal-wide" : ""}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+          <button className="close-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="modal-body">{children}</div>
       </div>
@@ -58,7 +58,7 @@ export function ErrorNote({ error, onClose }: { error?: string; onClose?: () => 
   return (
     <div className="error-note">
       <span>{error}</span>
-      {onClose && <button className="icon-btn" onClick={onClose}>✕</button>}
+      {onClose && <button className="close-btn" onClick={onClose}>✕</button>}
     </div>
   );
 }

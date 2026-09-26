@@ -54,7 +54,7 @@ export function MyVisit({ place, memories }: { place: Place; memories: Memory[] 
                   {place.coverMemoryId === m.id ? <Pill tone="ok">Cover</Pill> : (
                     <button className="btn small" onClick={() => action.run(() => PlaceService.update(place.id, "coverMemoryId", m.id))}>Set cover</button>
                   )}
-                  <button className="icon-btn small" title="Remove from this place (stays in Photos)" onClick={() => action.run(() => MemoryService.remove(m.id))}>✕</button>
+                  <button className="close-btn small" title="Remove from this place (stays in Photos)" onClick={() => action.run(() => MemoryService.remove(m.id))}>✕</button>
                 </span>
               </figcaption>
             </figure>

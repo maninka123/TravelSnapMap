@@ -100,7 +100,7 @@ function Shell() {
             <section className="panel" onMouseDown={(e) => e.stopPropagation()}>
               <div className="panel-nav">
                 <button className="btn ghost" onClick={() => dismiss(false)}>← Back</button>
-                <button className="icon-btn" onClick={() => dismiss(true)} aria-label="Close">✕</button>
+                <button className="close-btn" onClick={() => dismiss(true)} aria-label="Close">✕</button>
               </div>
               <ErrorBoundary key={top.id} label="This page">
                 {top.type === "place" && <PlaceDetail key={top.id} id={top.id} />}

@@ -110,7 +110,7 @@ export function PlaceDetail({ id }: { id: string }) {
               <span className="small">{formatDate(s.creationDate)}</span>
               <div className="row">
                 <span className="muted small grow">{SOURCE[s.sourceType]}</span>
-                <button className="icon-btn small" title="Remove this screenshot from the place"
+                <button className="close-btn small" title="Remove this screenshot from the place"
                         onClick={(e) => { e.stopPropagation(); void action.run(() => PlaceService.removeScreenshot(place.id, s.id)); }}>✕</button>
               </div>
             </div>

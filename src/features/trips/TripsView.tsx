@@ -114,7 +114,7 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
                   <option value="">No day</option>
                   {Array.from({ length: 21 }, (_, i) => <option key={i + 1} value={i + 1}>Day {i + 1}</option>)}
                 </select>
-                <button className="icon-btn" title="Remove from trip" onClick={() => action.run(() => TripService.removeEntry(e.id))}>✕</button>
+                <button className="close-btn" title="Remove from trip" onClick={() => action.run(() => TripService.removeEntry(e.id))}>✕</button>
               </div>
             ))}
           </div>

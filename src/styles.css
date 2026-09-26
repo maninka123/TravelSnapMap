@@ -648,3 +648,13 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .map-preview-kind { display: inline-flex; align-items: center; gap: 5px; }
 .thumb-empty .cat-badge { box-shadow: none; }
 .filters-chips .cat-badge { box-shadow: none; }
+
+/* Close (✕): a small, light circle everywhere — easy to find, never loud */
+.close-btn { flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--fill); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1; cursor: pointer; transition: background-color 120ms, color 120ms, var(--press); }
+.close-btn:hover { background: var(--fill-strong); color: var(--text); }
+.close-btn:active { transform: scale(0.92); }
+.close-btn.small { width: 22px; height: 22px; font-size: 10px; }
+.search-token button { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+@media (prefers-reduced-motion: reduce) { .close-btn:active { transform: none; } }
+@media (prefers-contrast: more) { .close-btn { border: 1px solid var(--border); } }
