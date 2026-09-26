@@ -394,3 +394,13 @@ audio { width: 100%; }
 .price-table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px 6px; }
 .price-table td { padding: 3px 6px; }
 .price-table input { width: 100%; }
+
+/* Country flags (flag-icons SVGs, bundled): 4:3, rounded, with a hairline edge so white flags stay visible */
+.flag {
+  display: inline-block; flex: none; width: 1.25em; height: 0.9375em; vertical-align: -0.12em;
+  border-radius: 2px; background-size: cover; background-position: center; background-repeat: no-repeat;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18);
+}
+.flag.fi { line-height: 1; }
+.flag-unknown { background: var(--fill-strong); }
+@media (prefers-color-scheme: dark) { .flag { box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.22); } }

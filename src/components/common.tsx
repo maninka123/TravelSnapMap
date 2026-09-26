@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fileUrl, PlaceService } from "../api/services";
 import type { Place, PlaceCandidate } from "../api/types";
-import { CATEGORY, flag, STATUS } from "../lib/labels";
+import { CATEGORY, STATUS } from "../lib/labels";
 
 export function Thumb({ path, alt = "", className = "", fallback }: { path?: string | null; alt?: string; className?: string; fallback?: ReactNode }) {
   const src = fileUrl(path);
@@ -22,7 +22,7 @@ export function CategoryChip({ category }: { category: Place["category"] }) {
 export function PlaceLine({ place }: { place: Place }) {
   return (
     <span className="muted">
-      {flag(place.countryCode)} {[place.city, place.country].filter(Boolean).join(", ") || "Unknown location"}
+      <Flag code={place.countryCode} name={place.country} /> {[place.city, place.country].filter(Boolean).join(", ") || "Unknown location"}
     </span>
   );
 }
@@ -113,10 +113,17 @@ export function CandidateRow({ candidate, onPick, action = "Choose" }: { candida
   return (
     <div className="candidate">
       <div>
-        <div className="strong">{flag(candidate.countryCode)} {candidate.name}</div>
+        <div className="strong"><Flag code={candidate.countryCode} name={candidate.country} /> {candidate.name}</div>
         <div className="muted small">{[candidate.address, candidate.country].filter(Boolean).join(" · ")}</div>
       </div>
       <button className="btn" onClick={onPick}>{action}</button>
     </div>
   );
+}
+
+/** Country flag as a crisp SVG (flag-icons, bundled locally) — consistent everywhere, unlike emoji flags. */
+export function Flag({ code, name }: { code?: string | null; name?: string | null }) {
+  const label = name ?? code ?? "Unknown country";
+  if (!code || !/^[a-z]{2}$/i.test(code)) return <span className="flag flag-unknown" role="img" aria-label={label} title={label} />;
+  return <span className={`flag fi fi-${code.toLowerCase()}`} role="img" aria-label={label} title={label} />;
 }

@@ -83,11 +83,6 @@ export const PROCESSING: Record<ProcessingStatus, { label: string; tone: "ok" | 
   failed: { label: "Failed", tone: "bad" },
 };
 
-export function flag(code: string | null | undefined): string {
-  if (!code || code.length !== 2) return "🏳️";
-  return String.fromCodePoint(...[...code.toUpperCase()].map((c) => 127397 + c.charCodeAt(0)));
-}
-
 export function formatDate(iso: string | null | undefined, withYear = true): string {
   if (!iso) return "Unknown date";
   const d = new Date(iso);

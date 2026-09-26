@@ -4,8 +4,8 @@ import { AppService, PhotoLibraryService } from "../../api/services";
 import { ScanControls } from "../../components/ScanControls";
 import { PlaceService } from "../../api/services";
 import type { Place, PlaceCategory, PersonalStatus } from "../../api/types";
-import { CategoryChip, PlaceLine, StatusBadge, Thumb } from "../../components/common";
-import { CATEGORY, flag, STATUS } from "../../lib/labels";
+import { CategoryChip, Flag, PlaceLine, StatusBadge, Thumb } from "../../components/common";
+import { CATEGORY, STATUS } from "../../lib/labels";
 import { useLoad, useNav } from "../../lib/nav";
 
 /** Free vector basemap (no API key). Swap the style URL to change providers. */
@@ -132,7 +132,7 @@ export function MapView() {
           <div className="country-chips">
             {countries.slice(0, 14).map((c) => (
               <button key={c.code} className={`chip-btn ${country === c.code ? "active" : ""}`} onClick={() => focusCountry(c.code)} title={c.name}>
-                {flag(c.code)} {c.count}
+                <Flag code={c.code} name={c.name} /> {c.count}
               </button>
             ))}
           </div>

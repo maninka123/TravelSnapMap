@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { PlaceService } from "../../api/services";
 import type { PlaceFilter } from "../../api/types";
-import { CategoryChip, Empty, Pill, PlaceLine, StatusBadge, Thumb } from "../../components/common";
-import { CATEGORY, flag, STATUS } from "../../lib/labels";
+import { CategoryChip, Empty, Flag, Pill, PlaceLine, StatusBadge, Thumb } from "../../components/common";
+import { CATEGORY, STATUS } from "../../lib/labels";
 import { useLoad, useNav } from "../../lib/nav";
 
 export function PlacesView() {
@@ -50,7 +50,7 @@ export function PlacesView() {
                value={filter.search ?? ""} onChange={(e) => set({ search: e.target.value || undefined })} />
         <select value={filter.countryCode ?? ""} onChange={(e) => set({ countryCode: e.target.value || undefined, city: undefined })}>
           <option value="">All countries</option>
-          {countries.map(([code, name]) => <option key={code} value={code}>{flag(code)} {name}</option>)}
+          {countries.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select>
         <select value={filter.city ?? ""} onChange={(e) => set({ city: e.target.value || undefined })}>
           <option value="">All cities</option>
@@ -95,7 +95,7 @@ export function PlacesView() {
         <div className="stack">
           {groups.map(([country, items]) => (
             <div key={country}>
-              <h4 style={{ margin: "10px 0 6px" }}>{flag(items[0].countryCode)} {country} · {items.length}</h4>
+              <h4 className="row" style={{ margin: "10px 0 6px", gap: 6 }}><Flag code={items[0].countryCode} name={country} /> {country} · {items.length}</h4>
               <div className="list">
                 {items.map((p) => (
                   <div key={p.id} className="list-row" onClick={() => nav.openPlace(p.id)}>
