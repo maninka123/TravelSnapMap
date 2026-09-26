@@ -78,7 +78,7 @@ function Shell() {
             <>
               {(overview.places - overview.unconfirmedPlaces).toLocaleString()} places on the map
               {overview.unconfirmedPlaces > 0 && (
-                <button className="link-btn" onClick={() => nav.go("review")}>{overview.unconfirmedPlaces} to confirm</button>
+                <button className="link-btn" onClick={() => nav.go("review")}>{overview.unconfirmedPlaces} places not confirmed yet</button>
               )}
             </>
           )}

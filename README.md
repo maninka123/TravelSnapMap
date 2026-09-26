@@ -3,6 +3,8 @@
 A macOS app that turns your travel screenshots and saved Instagram Reels into a personal map of places you want to go —
 with the tips, prices and opening hours you saved, each linked back to the screenshot or Reel it came from.
 
+![TravelSnapMap — saved places on the map](docs/screenshot.png)
+
 Built with Tauri 2, React + TypeScript, Rust + SQLite and a small Swift helper (PhotoKit, Vision, Speech, MapKit).
 macOS 15+, local-first.
 

@@ -359,7 +359,7 @@ class FitAllControl implements maplibregl.IControl {
     b.title = "Fit all places";
     b.setAttribute("aria-label", "Fit all places");
     b.className = "fit-all-btn";
-    b.textContent = "⌖";
+    b.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     b.onclick = this.onFit;
     this.el.appendChild(b);
     return this.el;
