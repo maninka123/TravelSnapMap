@@ -340,7 +340,7 @@ export interface PlaceFilter {
 }
 
 export type ScreenshotView =
-  | "all" | "processed" | "needsReview" | "multiplePlaces" | "noPlace" | "lowConfidence"
+  | "all" | "processed" | "needsReview" | "multiplePlaces" | "noPlace"
   | "ignored" | "notTravel" | "failed" | "pending" | "everything";
 
 export interface TranscriptSegment { start: number; end: number; text: string }

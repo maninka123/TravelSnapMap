@@ -14,14 +14,13 @@ const PRIMARY: { key: ScreenshotView; label: string }[] = [
   { key: "needsReview", label: "Needs review" },
   { key: "notTravel", label: "Not travel" },
 ];
-const MORE: { key: ScreenshotView; label: string }[] = [
-  { key: "processed", label: "Processed" },
-  { key: "multiplePlaces", label: "Multiple places" },
-  { key: "noPlace", label: "No place found" },
-  { key: "lowConfidence", label: "Low confidence" },
-  { key: "pending", label: "Pending" },
-  { key: "failed", label: "Failed" },
-  { key: "ignored", label: "Ignored" },
+const MORE: { key: ScreenshotView; label: string; section: "Travel" | "Other"; hint: string }[] = [
+  { key: "processed", label: "Places found", section: "Travel", hint: "Place confirmed and on your map" },
+  { key: "multiplePlaces", label: "Several places", section: "Travel", hint: "One screenshot covering 2+ places" },
+  { key: "noPlace", label: "No place yet", section: "Travel", hint: "Travel-related, no specific place identified" },
+  { key: "pending", label: "Not read yet", section: "Other", hint: "Waiting to be processed" },
+  { key: "failed", label: "Couldn't read", section: "Other", hint: "Errors, e.g. an iCloud download failed" },
+  { key: "ignored", label: "Ignored", section: "Other", hint: "Hidden by you" },
 ];
 
 /** The library of evidence: travel screenshots and Instagram Reels side by side. */
@@ -45,6 +44,10 @@ export function SourcesView() {
     return { all: travel, needsReview, notTravel, current } as Record<string, number>;
   }, [view, search]);
   const shownShots = items.filter((i) => i.kind === "screenshot").length;
+  const { data: moreCounts } = useLoad(async () => {
+    const entries = await Promise.all(MORE.map(async (m) => [m.key, await ScreenshotService.count(m.key, search)] as const));
+    return Object.fromEntries(entries) as Record<string, number>;
+  }, [search]);
   const shown = items.filter((i) => kind === "all" || i.kind === kind);
   // The viewer steps through the whole tab (not just the loaded page), in the same order as the grid.
   const { data: shotRefs } = useLoad(() => ScreenshotService.refs(view, search), [view, search]);
@@ -86,9 +89,20 @@ export function SourcesView() {
             {MORE.find((m) => m.key === view)?.label ?? "More"}
             {MORE.some((m) => m.key === view) && counts && <span className="tab-count">{counts.current.toLocaleString()}</span>} ▾
           </summary>
-          <div className="menu-items card" style={{ left: 0, right: "auto" }}>
-            {MORE.map((m) => (
-              <button key={m.key} className="btn ghost" onClick={() => setView(m.key)}>{m.label}</button>
+          <div className="menu-items card more-menu" style={{ left: 0, right: "auto" }}>
+            {(["Travel", "Other"] as const).map((section) => (
+              <div key={section} className="more-section">
+                <h5>{section}</h5>
+                {MORE.filter((m) => m.section === section)
+                  // "Not read yet" only when something is actually waiting.
+                  .filter((m) => m.key !== "pending" || (moreCounts?.pending ?? 0) > 0 || view === "pending")
+                  .map((m) => (
+                    <button key={m.key} className={`more-item ${view === m.key ? "active" : ""}`} onClick={() => setView(m.key)} title={m.hint}>
+                      <span className="grow">{m.label}</span>
+                      {moreCounts?.[m.key] !== undefined && <span className="tab-count">{moreCounts[m.key].toLocaleString()}</span>}
+                    </button>
+                  ))}
+              </div>
             ))}
           </div>
         </details>

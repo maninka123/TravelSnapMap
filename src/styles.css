@@ -672,3 +672,11 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
   font-size: 17px; letter-spacing: -0.01em; background: color-mix(in srgb, var(--bg) 88%, transparent);
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
 .country-head .muted { font-size: 13px; font-weight: 500; }
+
+/* Sources → More: two small sections with counts */
+.more-menu { min-width: 230px; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.more-section h5 { margin: 4px 8px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.more-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.more-item:hover { background: var(--fill); }
+.more-item:active { background: var(--fill-strong); }
+.more-item.active { color: var(--accent); font-weight: 600; }

@@ -30,7 +30,7 @@ pub struct PlaceFilter {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ScreenshotFilter {
-    /// all | processed | needsReview | multiplePlaces | noPlace | lowConfidence | ignored | notTravel | failed | pending | everything
+    /// all | processed | needsReview | multiplePlaces | noPlace | ignored | notTravel | failed | pending | everything
     pub view: Option<String>,
     pub search: Option<String>,
     pub limit: Option<i64>,
@@ -194,7 +194,6 @@ impl Database {
             "needsReview" => "s.status = 'needsReview'",
             "multiplePlaces" => "(SELECT COUNT(*) FROM place_screenshots ps WHERE ps.screenshot_id = s.id) > 1",
             "noPlace" => "(s.classification = 'travel' OR s.user_classification = 'travel') AND s.status NOT IN ('ignored','notTravel') AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.screenshot_id = s.id)",
-            "lowConfidence" => "s.classification IN ('travel','uncertain') AND s.travel_confidence < 0.8 AND s.status NOT IN ('ignored','notTravel')",
             "ignored" => "s.status = 'ignored'",
             "notTravel" => "s.status = 'notTravel'",
             "failed" => "s.status = 'failed'",
