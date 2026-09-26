@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { PlaceService } from "../../api/services";
-import type { PersonalStatus, PlaceCandidate } from "../../api/types";
+import type { PersonalStatus, PlaceCandidate, PlaceCategory } from "../../api/types";
 import { ErrorNote, Flag, Modal } from "../../components/common";
 import { PlacePickList } from "../../components/PlacePicker";
-import { CATEGORY, STATUS } from "../../lib/labels";
+import { CategoryPicker } from "../../components/CategoryPicker";
+import { STATUS } from "../../lib/labels";
 import { useAction, useNav } from "../../lib/nav";
 
 /**
@@ -15,7 +16,7 @@ export function QuickAddPlace({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<PlaceCandidate>();
   const [status, setStatus] = useState<PersonalStatus>("wantToVisit");
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState<PlaceCategory | "">("");
   const [notes, setNotes] = useState("");
   const save = useAction();
 
@@ -54,10 +55,7 @@ export function QuickAddPlace({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <div className="field"><label>Kind of place</label>
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">Automatic (from Apple Maps)</option>
-              {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
-            </select>
+            <CategoryPicker value={category} onChange={setCategory} allowAuto autoLabel="Automatic (from Apple Maps)" />
           </div>
           <div className="field"><label>Notes (optional)</label>
             <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Why you want to go, who told you about it…" />

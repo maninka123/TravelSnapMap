@@ -132,7 +132,7 @@ export function SourcesView() {
                     <span className="small strong tile-title">{r.creator ?? "Instagram Reel"}</span>
                     <span className="muted small tile-title">{r.caption ?? r.url}</span>
                     <div className="row wrap">
-                      <Pill tone={p.tone}>{p.label}</Pill>
+                      {r.status === "needsReview" && <Pill tone={p.tone}>{p.label}</Pill>}
                       {r.placeCount > 0 && <span className="muted small">{r.placeCount} 📍</span>}
                       {r.transcript.length > 0 && <span className="muted small" title="Voice transcript saved">🎙️</span>}
                     </div>
@@ -150,7 +150,7 @@ export function SourcesView() {
                   <span className="small">{formatDate(s.creationDate)}</span>
                   <span className="muted small">{SOURCE[s.sourceType]}{s.creator ? ` · ${s.creator}` : ""}</span>
                   <div className="row wrap">
-                    <Pill tone={p.tone}>{p.label}</Pill>
+                    {s.status === "needsReview" && <Pill tone={p.tone}>{p.label}</Pill>}
                     {s.placeCount > 0 && <span className="muted small">{s.placeCount} 📍</span>}
                   </div>
                 </div>

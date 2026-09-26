@@ -68,6 +68,8 @@ export function PlacesView() {
         return [country, sorted] as const;
       });
   }, [places]);
+  // Opening a place lets the viewer step through (and move on after removing) in this same order.
+  const order = useMemo(() => groups.flatMap(([, items]) => items.map((p) => ({ type: "place" as const, id: p.id }))), [groups]);
 
   return (
     <div className="page">
@@ -117,7 +119,7 @@ export function PlacesView() {
               <h3 className="country-head"><Flag code={items[0].countryCode} name={country} /> {country}<span className="muted">{items.length}</span></h3>
               <div className="grid">
                 {items.map((p) => (
-                <div key={p.id} className="tile" onClick={() => nav.openPlace(p.id)}>
+                <div key={p.id} className="tile" onClick={() => nav.openPlace(p.id, order)}>
                   <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
                   <div className="tile-body">
                     <div className="row"><span className="tile-title grow">{p.canonicalName}</span><StatusBadge place={p} /></div>
@@ -144,7 +146,7 @@ export function PlacesView() {
               <h3 className="country-head"><Flag code={items[0].countryCode} name={country} /> {country}<span className="muted">{items.length}</span></h3>
               <div className="list">
                 {items.map((p) => (
-                  <div key={p.id} className="list-row" onClick={() => nav.openPlace(p.id)}>
+                  <div key={p.id} className="list-row" onClick={() => nav.openPlace(p.id, order)}>
                     <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
                     <div className="grow">
                       <div className="strong">{p.canonicalName}</div>

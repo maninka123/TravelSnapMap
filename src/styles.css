@@ -684,3 +684,36 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 /* "Not travel" on a place's sources: amber, clearly different from destructive red */
 .not-travel-btn { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
 .not-travel-btn:hover { background: color-mix(in srgb, var(--warn) 22%, transparent); }
+
+/* Kind-of-place picker with icons (native selects can't show icons) */
+.cat-picker { position: relative; display: inline-block; }
+.cat-picker-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 170px; height: 32px; padding: 0 10px 0 6px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; cursor: pointer; text-align: left; }
+.cat-picker-btn:hover { background: var(--fill); }
+.cat-picker-btn:active { background: var(--fill-strong); }
+.cat-picker-chevron { color: var(--muted); font-size: 11px; }
+.cat-picker-auto { width: 20px; text-align: center; color: var(--accent); flex: none; }
+.cat-picker-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 250px; max-height: min(60vh, 460px); overflow: auto; padding: 5px;
+  border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-l);
+  animation: materialize 160ms var(--ease-out); transform-origin: top left; }
+.cat-group h5 { margin: 8px 8px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.cat-option { width: 100%; display: flex; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.cat-option:hover { background: var(--fill); }
+.cat-option:active { background: var(--fill-strong); }
+.cat-option.active { font-weight: 600; }
+.cat-check { color: var(--accent); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .cat-picker-menu { animation-name: fade-in !important; } }
+
+.btn.danger-solid { background: var(--bad); color: #fff; }
+.btn.danger-solid:hover { filter: brightness(1.08); }
+
+/* Source tiles on a place: a small red ✕ = move this one to Not travel */
+.close-btn.not-travel-x { background: var(--bad-soft); color: var(--bad); }
+.close-btn.not-travel-x:hover { background: var(--bad); color: #fff; }
+
+/* Place page source tiles: ✕ sits on the picture's corner, text lines never collide */
+.source-tile { position: relative; }
+.source-tile .source-x { position: absolute; top: 6px; right: 6px; z-index: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.25); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.source-tile .source-x:hover { background: var(--bad); color: #fff; }
+.source-tile .tile-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.source-tile .tile-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

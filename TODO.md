@@ -112,3 +112,5 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Ignore: stays under More → Ignored but affects nothing (no places, tips, photos, reviews, map); places only it created are removed unless you added notes/visit/photos/trip/status; never reprocessed; viewer moves to the next item
 - [x] Viewer: ‹ › and ←/→ step through the Sources list
 - [x] Place page: each source has an amber “Not travel” (the pin stays if other sources support it); Delete place only for places you added yourself
+- [x] Kind-of-place menu with icons (grouped like the map); red Remove pin with a clear confirmation; after removal the next place opens
+- [x] Source cards: tag only when Needs review; small red ✕ on a place's sources moves one to Not travel

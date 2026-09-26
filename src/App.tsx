@@ -106,7 +106,7 @@ function Shell() {
             <section className="panel" onMouseDown={(e) => e.stopPropagation()}>
               <div className="panel-nav">
                 <button className="btn ghost" onClick={() => dismiss(false)}>← Back</button>
-                {top.type !== "place" && top.list && top.list.length > 1 && (() => {
+                {top.list && top.list.length > 1 && (() => {
                   const i = top.list.findIndex((r) => r.id === top.id && r.type === top.type);
                   return (
                     <span className="panel-stepper">

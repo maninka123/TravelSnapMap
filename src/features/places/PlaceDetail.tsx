@@ -5,7 +5,9 @@ import type { Fact, Place, PlaceDetail as Detail, PlaceWarning } from "../../api
 import { ErrorNote, Modal, PlaceLine, Pill, Thumb } from "../../components/common";
 import { AddFact, FactRow } from "../../components/FactsEditor";
 import { PlaceSearchDialog } from "../../components/PlacePicker";
-import { CATEGORY, FACT, formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
+import { CategoryPicker } from "../../components/CategoryPicker";
+import { colorOf } from "../../lib/categoryIcons";
+import { FACT, formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
 import { CategoryBadge } from "../../lib/categoryIcons";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { quietBasemap } from "../map/MapView";
@@ -17,15 +19,19 @@ export function PlaceDetail({ id }: { id: string }) {
   const nav = useNav();
   const { data, error } = useLoad(() => PlaceService.detail(id), [id]);
   const action = useAction();
-  const [dialog, setDialog] = useState<"location" | "merge" | "split" | "trip" | null>(null);
+  const [dialog, setDialog] = useState<"location" | "merge" | "split" | "trip" | "remove" | null>(null);
 
   // Move one source to Not travel; if that was the place's only support, the place is gone — go back.
   const notTravel = async (run: () => Promise<void>) => {
     if (await action.run(run) === undefined) return;
     const stillThere = await PlaceService.detail(id).then(() => true, () => false);
-    if (!stillThere) nav.back();
+    if (!stillThere) nav.advanceAfterRemoval();
   };
 
+  // The place was removed (here or elsewhere): move on instead of showing "Place not found".
+  const gone = !!error && /not found/i.test(error);
+  useEffect(() => { if (gone) nav.advanceAfterRemoval(); }, [gone]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (gone) return null;
   if (error) return <p className="bad">{error}</p>;
   if (!data) return <p className="muted">Loading…</p>;
   const { place } = data;
@@ -43,9 +49,7 @@ export function PlaceDetail({ id }: { id: string }) {
           <select value={place.personalStatus} onChange={(e) => action.run(() => PlaceService.update(place.id, "personalStatus", e.target.value))}>
             {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
           </select>
-          <select value={place.category} onChange={(e) => action.run(() => PlaceService.update(place.id, "category", e.target.value))}>
-            {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
-          </select>
+          <CategoryPicker value={place.category} onChange={(c) => c && action.run(() => PlaceService.update(place.id, "category", c))} />
           {place.verification === "needsReview" && <Pill tone="warn">Location not confirmed</Pill>}
           {place.isUserVerified && <Pill tone="ok">Verified by you</Pill>}
           <span className="spacer" />
@@ -58,12 +62,7 @@ export function PlaceDetail({ id }: { id: string }) {
               <button className="btn ghost" onClick={() => setDialog("location")}>Correct location</button>
               <button className="btn ghost" onClick={() => setDialog("merge")}>Merge into another place…</button>
               <button className="btn ghost" disabled={data.screenshots.length + data.reels.length < 2} onClick={() => setDialog("split")}>Split sources into a new place…</button>
-              {/* Places from screenshots/Reels go away by marking their sources Not travel; only places you added yourself are deleted directly. */}
-              {data.screenshots.length + data.reels.length === 0 && (
-                <button className="btn ghost danger" onClick={async () => {
-                  if (await action.run(() => PlaceService.remove(place.id)) !== undefined) nav.back();
-                }}>Delete place</button>
-              )}
+              <button className="btn ghost danger" onClick={() => setDialog("remove")}>Remove pin…</button>
             </div>
           </details>
         </div>
@@ -105,28 +104,26 @@ export function PlaceDetail({ id }: { id: string }) {
       <div className="section"><h3>Sources</h3><span className="muted small">{data.screenshots.length + data.reels.length}</span></div>
       <div className="grid small-tiles">
         {data.reels.map((r) => (
-          <div key={r.id} className="tile portrait" onClick={() => nav.openReel(r.id)}>
+          <div key={r.id} className="tile portrait source-tile" onClick={() => nav.openReel(r.id)}>
             <Thumb path={r.thumbnailPath} fallback="🎬" />
+            <button className="close-btn small not-travel-x source-x" title="Move this Reel to Not travel (the place stays if other sources support it)" aria-label="Move to Not travel"
+                    onClick={(e) => { e.stopPropagation(); void notTravel(() => ReelService.action(r.id, "markNotTravel")); }}>✕</button>
             <div className="tile-body">
-              <span className="small strong">🎬 Reel {r.creator ?? ""}</span>
-              <div className="row">
-                <span className="muted small grow">{formatDate(r.createdAt)}</span>
-                <button className="btn small not-travel-btn" title="Move this Reel to Not travel. The place stays if other sources support it."
-                        onClick={(e) => { e.stopPropagation(); void notTravel(() => ReelService.action(r.id, "markNotTravel")); }}>Not travel</button>
-              </div>
+              <span className="small strong tile-title">🎬 Reel {r.creator ?? ""}</span>
+              <span className="muted small">{formatDate(r.createdAt)}</span>
+              {r.status === "needsReview" && <span><Pill tone="warn">Needs review</Pill></span>}
             </div>
           </div>
         ))}
         {data.screenshots.map((s) => (
-          <div key={s.id} className="tile portrait" onClick={() => nav.openScreenshot(s.id)}>
+          <div key={s.id} className="tile portrait source-tile" onClick={() => nav.openScreenshot(s.id)}>
             <Thumb path={s.thumbnailPath} />
+            <button className="close-btn small not-travel-x source-x" title="Move this screenshot to Not travel (the place stays if other sources support it)" aria-label="Move to Not travel"
+                    onClick={(e) => { e.stopPropagation(); void notTravel(() => ScreenshotService.action(s.id, "markNotTravel")); }}>✕</button>
             <div className="tile-body">
               <span className="small">{formatDate(s.creationDate)}</span>
-              <div className="row">
-                <span className="muted small grow">{SOURCE[s.sourceType]}</span>
-                <button className="btn small not-travel-btn" title="Move this screenshot to Not travel. The place stays if other sources support it."
-                        onClick={(e) => { e.stopPropagation(); void notTravel(() => ScreenshotService.action(s.id, "markNotTravel")); }}>Not travel</button>
-              </div>
+              <span className="muted small tile-title">{SOURCE[s.sourceType]}</span>
+              {s.status === "needsReview" && <span><Pill tone="warn">Needs review</Pill></span>}
             </div>
           </div>
         ))}
@@ -150,6 +147,7 @@ export function PlaceDetail({ id }: { id: string }) {
       {dialog === "merge" && <MergeDialog place={place} onClose={() => setDialog(null)} onMerged={(target) => { setDialog(null); nav.back(); nav.openPlace(target); }} />}
       {dialog === "split" && <SplitDialog detail={data} onClose={() => setDialog(null)} />}
       {dialog === "trip" && <AddToTripDialog placeId={place.id} onClose={() => setDialog(null)} />}
+      {dialog === "remove" && <RemovePinDialog detail={data} onClose={() => setDialog(null)} onRemoved={() => { setDialog(null); nav.advanceAfterRemoval(); }} />}
     </div>
   );
 }
@@ -170,6 +168,49 @@ function Warnings({ warnings }: { warnings: PlaceWarning[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Remove a place from the map, saying plainly what happens to its screenshots and Reels. */
+function RemovePinDialog({ detail, onClose, onRemoved }: { detail: Detail; onClose: () => void; onRemoved: () => void }) {
+  const { place, screenshots, reels, facts } = detail;
+  const sources = screenshots.length + reels.length;
+  const [alsoNotTravel, setAlsoNotTravel] = useState(false);
+  const action = useAction();
+  const what = [screenshots.length && `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"}`, reels.length && `${reels.length} Reel${reels.length === 1 ? "" : "s"}`].filter(Boolean).join(" and ");
+
+  const remove = async () => {
+    const done = await action.run(async () => {
+      if (alsoNotTravel) {
+        for (const s of screenshots) await ScreenshotService.action(s.id, "markNotTravel");
+        for (const r of reels) await ReelService.action(r.id, "markNotTravel");
+      }
+      // Marking the sources may already have removed it (it was their only place); remove it if it's still there.
+      if (await PlaceService.detail(place.id).then(() => true, () => false)) await PlaceService.remove(place.id);
+    });
+    if (done !== undefined) onRemoved();
+  };
+
+  return (
+    <Modal title={`Remove “${place.canonicalName}” from your map?`} onClose={onClose}>
+      <p className="muted">
+        The pin, its {facts.length} tip{facts.length === 1 ? "" : "s"}, photos and your notes are removed.
+        {sources > 0 ? ` Its ${what} stay in Sources.` : ""}
+      </p>
+      {sources > 0 && (
+        <label className="check">
+          <input type="checkbox" checked={alsoNotTravel} onChange={(e) => setAlsoNotTravel(e.target.checked)} />
+          <span>Also move {sources === 1 ? "it" : `those ${what}`} to Not travel
+            <br /><span className="muted small">So {sources === 1 ? "it isn't" : "they aren't"} used again. Leave unticked if {sources === 1 ? "it shows" : "they show"} other places you want to keep.</span></span>
+        </label>
+      )}
+      <ErrorNote error={action.error} onClose={action.clearError} />
+      <div className="row">
+        <span className="grow" />
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn danger-solid" disabled={action.busy} onClick={remove}>{action.busy ? "Removing…" : "Remove pin"}</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -194,7 +235,7 @@ function MiniMap({ place }: { place: Place }) {
   useEffect(() => {
     if (!ref.current) return;
     const map = new maplibregl.Map({ container: ref.current, style: resolveMapStyle().url, center: [place.longitude, place.latitude], zoom: 13, interactive: true, attributionControl: false });
-    new maplibregl.Marker({ color: CATEGORY[place.category]?.color }).setLngLat([place.longitude, place.latitude]).addTo(map);
+    new maplibregl.Marker({ color: colorOf(place.category) }).setLngLat([place.longitude, place.latitude]).addTo(map);
     map.on("load", () => quietBasemap(map));
     return () => map.remove();
   }, [place.latitude, place.longitude, place.category]);
