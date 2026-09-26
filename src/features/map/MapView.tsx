@@ -48,34 +48,55 @@ export function MapView() {
 
   useEffect(() => { try { localStorage.setItem("map.areaOpen", areaOpen ? "1" : "0"); } catch { /* per-viewer convenience only */ } }, [areaOpen]);
 
+  // A country or city picked from the search: everything (pins, suggestions, filters, list) is limited to it.
+  const [scope, setScope] = useState<Scope>();
+  const scoped = useMemo(() => places.filter((p) => !scope || (scope.kind === "country" ? p.countryCode === scope.key : p.city === scope.key)), [places, scope]);
+
+  // Drop filter choices that don't exist in the new country/city, so a hidden filter never empties the map.
+  useEffect(() => {
+    setCategories((c) => c.filter((x) => scoped.some((p) => p.category === x)));
+    setStatuses((st) => st.filter((x) => scoped.some((p) => p.personalStatus === x)));
+  }, [scoped]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return places.filter((p) =>
+    return scoped.filter((p) =>
       (categories.length === 0 || categories.includes(p.category)) &&
       (statuses.length === 0 || statuses.includes(p.personalStatus)) &&
       (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q)));
-  }, [places, categories, statuses, search]);
+  }, [scoped, categories, statuses, search]);
 
   // Saved places inside the visible map area (not an internet search — only your own places).
   const inView = useMemo(() => (bounds ? filtered.filter((p) => bounds.contains([p.longitude, p.latitude])) : filtered), [filtered, bounds]);
 
-  const suggestions = useMemo(() => suggest(places, search), [places, search]);
+  const suggestions = useMemo(() => suggest(scoped, search, scope), [scoped, search, scope]);
+
+  const enterScope = (next: Scope | undefined) => {
+    setScope(next);
+    setSearch("");
+    setActive(0);
+    const map = mapRef.current;
+    const inScope = places.filter((p) => !next || (next.kind === "country" ? p.countryCode === next.key : p.city === next.key));
+    if (map) fit(map, inScope);
+  };
 
   const pick = (s: Suggestion) => {
-    setSuggestOpen(false);
     const map = mapRef.current;
     if (s.kind === "place") {
+      setSuggestOpen(false);
       setSearch(s.place.canonicalName);
       setSelected(s.place);
       map?.easeTo({ center: [s.place.longitude, s.place.latitude], zoom: Math.max(map.getZoom(), 12) });
     } else {
-      setSearch("");
-      if (map) fit(map, places.filter((p) => (s.kind === "country" ? p.countryCode === s.key : p.city === s.label)));
-      setAreaOpen(true);
+      // Keep the list open so the country's cities (or the city's places) are offered next.
+      enterScope({
+        kind: s.kind, key: s.key, label: s.label,
+        code: s.kind === "country" ? s.key : s.code,
+        parent: s.kind === "city" && scope?.kind === "country" ? scope : undefined,
+      });
+      setSuggestOpen(true);
     }
   };
-
-  const fitAll = () => { if (mapRef.current) fit(mapRef.current, placesRef.current); };
 
   // Create the map once.
   useEffect(() => {
@@ -200,11 +221,19 @@ export function MapView() {
           <div className="map-search-wrap">
             <label className="map-search">
               <SearchIcon />
-              <input placeholder="Search your saved places" value={search}
+              {scope && (
+                <span className="search-token">
+                  {scope.code && <Flag code={scope.code} name={scope.label} />} {scope.label}
+                  <button aria-label={`Show all places, not only ${scope.label}`} onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => enterScope(scope.kind === "city" && scope.parent ? scope.parent : undefined)}>✕</button>
+                </span>
+              )}
+              <input placeholder={scope ? `Search in ${scope.label}` : "Search your saved places"} value={search}
                      onChange={(e) => { setSearch(e.target.value); setSuggestOpen(true); setActive(0); }}
                      onFocus={() => setSuggestOpen(true)}
                      onBlur={() => setTimeout(() => setSuggestOpen(false), 120)}
                      onKeyDown={(e) => {
+                       if (e.key === "Backspace" && !search && scope) { enterScope(scope.kind === "city" && scope.parent ? scope.parent : undefined); return; }
                        if (!suggestions?.length) return;
                        if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, suggestions.length - 1)); }
                        else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
@@ -215,7 +244,10 @@ export function MapView() {
             </label>
             {suggestOpen && suggestions && (
               <div className="search-suggest" role="listbox">
-                {suggestions.length === 0 && <div className="search-suggest-empty">No saved places match “{search.trim()}”</div>}
+                {!search.trim() && suggestions.length > 0 && (
+                  <div className="search-suggest-title">{scope?.kind === "country" ? `Cities and places in ${scope.label}` : scope ? `Places in ${scope.label}` : "Your countries"}</div>
+                )}
+                {suggestions.length === 0 && search.trim() && <div className="search-suggest-empty">No saved places {scope ? `in ${scope.label} ` : ""}match “{search.trim()}”</div>}
                 {suggestions.map((s, i) => (
                   <button key={`${s.kind}-${s.key}`} role="option" aria-selected={i === active}
                           className={`suggest-row ${i === active ? "active" : ""}`}
@@ -241,7 +273,7 @@ export function MapView() {
               Filters{filterCount ? ` · ${filterCount}` : ""}
             </button>
             {filtersOpen && (
-              <FiltersPopover places={places} categories={categories} statuses={statuses}
+              <FiltersPopover places={scoped} categories={categories} statuses={statuses}
                               setCategories={setCategories} setStatuses={setStatuses} onClose={() => setFiltersOpen(false)} />
             )}
           </div>
@@ -253,7 +285,8 @@ export function MapView() {
 
         {areaOpen && <AreaPanel places={inView} selectedId={selected?.id} map={mapRef.current}
           onPick={(p) => { setSelected(p); mapRef.current?.easeTo({ center: [p.longitude, p.latitude], zoom: Math.max(mapRef.current.getZoom(), 12) }); }}
-          onClose={() => setAreaOpen(false)} onFitAll={fitAll} />}
+          onClose={() => setAreaOpen(false)} onFitAll={() => enterScope(undefined)}
+          onCountry={(code, label) => enterScope({ kind: "country", key: code, label, code })} />}
       </div>
 
       <div className="map-style-wrap">
@@ -383,8 +416,9 @@ function FiltersPopover({ places, categories, statuses, setCategories, setStatus
  * Saved places in the visible map area. Grouped by country when several are in view, by city once you've
  * zoomed into one country — so the list follows the map.
  */
-function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll }: {
+function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll, onCountry }: {
   places: Place[]; selectedId?: string; map?: MLMap; onPick: (p: Place) => void; onClose: () => void; onFitAll: () => void;
+  onCountry?: (code: string, name: string) => void;
 }) {
   const countries = new Set(places.map((p) => p.countryCode ?? "?"));
   const byCountry = countries.size > 1;
@@ -413,7 +447,7 @@ function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll }: {
       <div className="area-list">
         {places.length === 0 && <p className="muted small area-empty">No saved places here. Zoom out or press ⌖ to see them all.</p>}
         {groups.map((g) => byCountry ? (
-          <button key={g.label} className="area-group-row" onClick={() => map && fit(map, g.items)}>
+          <button key={g.label} className="area-group-row" onClick={() => (g.code && onCountry ? onCountry(g.code, g.label) : map && fit(map, g.items))}>
             <Flag code={g.code} name={g.label} />
             <span className="grow">{g.label}</span>
             <span className="area-count">{g.items.length}</span>
@@ -481,14 +515,20 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
   );
 }
 
+type Scope = { kind: "country" | "city"; key: string; label: string; code: string | null; parent?: Scope };
+
 type Suggestion =
   | { kind: "place"; key: string; label: string; sub: string; place: Place }
-  | { kind: "city" | "country"; key: string; label: string; sub: string };
+  | { kind: "city" | "country"; key: string; label: string; sub: string; code: string | null };
 
-/** Suggestions while typing: names starting with the text first, then words starting with it, then anywhere. */
-function suggest(places: Place[], query: string): Suggestion[] | undefined {
+/**
+ * Suggestions for the search field, from the places in scope only. With nothing typed: your countries, or
+ * — once a country is picked — its cities and places. While typing: names starting with the text first,
+ * then words starting with it, then anywhere.
+ */
+function suggest(places: Place[], query: string, scope?: Scope): Suggestion[] {
   const q = query.toLowerCase().trim();
-  if (!q) return undefined;
+  if (!q) return browse(places, scope);
   const rank = (text: string | null | undefined) => {
     const t = (text ?? "").toLowerCase();
     if (t.startsWith(q)) return 0;
@@ -497,25 +537,50 @@ function suggest(places: Place[], query: string): Suggestion[] | undefined {
   };
   const scored: [number, Suggestion][] = [];
   const countries = new Map<string, { name: string; count: number }>();
-  const cities = new Map<string, { country: string | null; count: number }>();
+  const cities = new Map<string, { country: string | null; code: string | null; count: number }>();
   for (const p of places) {
     if (p.countryCode && p.country) countries.set(p.countryCode, { name: p.country, count: (countries.get(p.countryCode)?.count ?? 0) + 1 });
-    if (p.city && p.city !== p.canonicalName) cities.set(p.city, { country: p.country, count: (cities.get(p.city)?.count ?? 0) + 1 });
+    if (p.city && p.city !== p.canonicalName) cities.set(p.city, { country: p.country, code: p.countryCode, count: (cities.get(p.city)?.count ?? 0) + 1 });
     const r = Math.min(rank(p.canonicalName), ...p.alternativeNames.map(rank));
     if (r < 9) {
       const cat = CATEGORY[p.category] ?? CATEGORY.other;
       scored.push([r, { kind: "place", key: p.id, label: p.canonicalName, sub: [cat.label, p.city !== p.canonicalName ? p.city : null, p.country].filter(Boolean).join(" · "), place: p }]);
     }
   }
-  for (const [code, c] of countries) {
+  for (const [code, c] of scope ? [] : countries) {
     const r = Math.min(rank(c.name), code.toLowerCase() === q ? 0 : 9);
-    if (r < 9) scored.push([r - 0.5, { kind: "country", key: code, label: c.name, sub: `${c.count} saved place${c.count === 1 ? "" : "s"}` }]);
+    if (r < 9) scored.push([r - 0.5, { kind: "country", key: code, label: c.name, sub: `${c.count} saved place${c.count === 1 ? "" : "s"}`, code }]);
   }
-  for (const [city, c] of cities) {
+  for (const [city, c] of scope?.kind === "city" ? [] : cities) {
     const r = rank(city);
-    if (r < 9) scored.push([r - 0.25, { kind: "city", key: city, label: city, sub: [c.country, `${c.count} place${c.count === 1 ? "" : "s"}`].filter(Boolean).join(" · ") }]);
+    if (r < 9) scored.push([r - 0.25, { kind: "city", key: city, label: city, sub: [c.country, `${c.count} place${c.count === 1 ? "" : "s"}`].filter(Boolean).join(" · "), code: c.code }]);
   }
   return scored.sort((a, b) => a[0] - b[0] || a[1].label.localeCompare(b[1].label)).slice(0, 8).map(([, s]) => s);
+}
+
+/** Nothing typed yet: offer what's available in scope, biggest first. */
+function browse(places: Place[], scope?: Scope): Suggestion[] {
+  const count = <K,>(key: (p: Place) => K | null | undefined) => {
+    const m = new Map<K, Place[]>();
+    places.forEach((p) => { const k = key(p); if (k != null) m.set(k, [...(m.get(k) ?? []), p]); });
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
+  };
+  const placeRow = (p: Place): Suggestion => {
+    const cat = CATEGORY[p.category] ?? CATEGORY.other;
+    return { kind: "place", key: p.id, label: p.canonicalName, sub: [cat.label, p.city !== p.canonicalName ? p.city : null].filter(Boolean).join(" · "), place: p };
+  };
+  const n = (k: number) => `${k} saved place${k === 1 ? "" : "s"}`;
+  if (!scope) {
+    return count((p) => p.countryCode).slice(0, 10).map(([code, ps]) => ({ kind: "country", key: code, label: ps[0].country ?? code, sub: n(ps.length), code }));
+  }
+  if (scope.kind === "country") {
+    const cities: Suggestion[] = count((p) => (p.city && p.city !== p.canonicalName ? p.city : null)).slice(0, 6)
+      .map(([city, ps]) => ({ kind: "city", key: city, label: city, sub: n(ps.length), code: scope.code }));
+    const shown = new Set(cities.map((c) => c.key));
+    const places2 = places.filter((p) => !p.city || !shown.has(p.city)).sort((a, b) => b.sourceCount - a.sourceCount).slice(0, 10 - cities.length).map(placeRow);
+    return [...cities, ...places2];
+  }
+  return [...places].sort((a, b) => b.sourceCount - a.sourceCount).slice(0, 10).map(placeRow);
 }
 
 /** Bold the typed part of a suggestion. */
