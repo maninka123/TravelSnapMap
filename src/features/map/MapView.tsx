@@ -1,4 +1,4 @@
-import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
+import maplibregl, { type GeoJSONSource, type LngLatBounds, type Map as MLMap } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppService, PhotoLibraryService } from "../../api/services";
 import { ScanControls } from "../../components/ScanControls";
@@ -10,34 +10,57 @@ import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
 import { useLoad, useNav } from "../../lib/nav";
 
-/** Free vector basemap (no API key). Swap the style URL to change providers. */
-export const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const prefersDark = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+
+/**
+ * Quiet vector basemap (no API key) so your saved places stand out: OpenFreeMap Positron, or its dark
+ * counterpart in dark mode. Swap the style URL to change providers.
+ */
+export const MAP_STYLE = `https://tiles.openfreemap.org/styles/${prefersDark() ? "dark" : "positron"}`;
+
+/** Base-map labels that compete with your places: road names/shields, POIs, water lines, villages. */
+const NOISY_LABELS = /^(highway-name|highway-shield|road_shield|road-shield|waterway|water_name_line|airport|poi|label_other|label_village)/;
+
+/** Hides the busiest base-map labels; call once the style has loaded. */
+export function quietBasemap(map: MLMap) {
+  for (const layer of map.getStyle().layers ?? []) {
+    if (layer.type === "symbol" && NOISY_LABELS.test(layer.id)) map.setLayoutProperty(layer.id, "visibility", "none");
+  }
+}
+
+const CLUSTER = "#0f8a7e";
 
 export function MapView() {
   const nav = useNav();
   // The map shows verified places only; provisional ones wait in the Review inbox.
   const { data: places = [] } = useLoad(() => PlaceService.list({ verifiedOnly: true }), []);
-  const [category, setCategory] = useState<PlaceCategory | "">("");
-  const [status, setStatus] = useState<PersonalStatus | "">("");
-  const [country, setCountry] = useState("");
+  const [categories, setCategories] = useState<PlaceCategory[]>([]);
+  const [statuses, setStatuses] = useState<PersonalStatus[]>([]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Place>();
   const [adding, setAdding] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [areaOpen, setAreaOpen] = useState(() => { try { return localStorage.getItem("map.areaOpen") === "1"; } catch { return false; } });
+  const [bounds, setBounds] = useState<LngLatBounds>();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | undefined>(undefined);
   const placesRef = useRef<Place[]>([]);
 
+  useEffect(() => { try { localStorage.setItem("map.areaOpen", areaOpen ? "1" : "0"); } catch { /* per-viewer convenience only */ } }, [areaOpen]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return places.filter((p) =>
-      (!category || p.category === category) &&
-      (!status || p.personalStatus === status) &&
-      (!country || p.countryCode === country) &&
+      (categories.length === 0 || categories.includes(p.category)) &&
+      (statuses.length === 0 || statuses.includes(p.personalStatus)) &&
       (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q)));
-  }, [places, category, status, country, search]);
+  }, [places, categories, statuses, search]);
+
+  // Saved places inside the visible map area (not an internet search — only your own places).
+  const inView = useMemo(() => (bounds ? filtered.filter((p) => bounds.contains([p.longitude, p.latitude])) : filtered), [filtered, bounds]);
 
   const suggestions = useMemo(() => suggest(places, search), [places, search]);
 
@@ -48,59 +71,67 @@ export function MapView() {
       setSearch(s.place.canonicalName);
       setSelected(s.place);
       map?.easeTo({ center: [s.place.longitude, s.place.latitude], zoom: Math.max(map.getZoom(), 12) });
-    } else if (s.kind === "country") {
-      setSearch("");
-      setCountry(s.key);
-      if (map) fit(map, places.filter((p) => p.countryCode === s.key));
     } else {
-      setSearch(s.label);
-      if (map) fit(map, places.filter((p) => p.city === s.label));
+      setSearch("");
+      if (map) fit(map, places.filter((p) => (s.kind === "country" ? p.countryCode === s.key : p.city === s.label)));
+      setAreaOpen(true);
     }
   };
 
-  const countries = useMemo(() => {
-    const counts = new Map<string, { code: string; name: string; count: number }>();
-    for (const p of places) {
-      if (!p.countryCode) continue;
-      const c = counts.get(p.countryCode) ?? { code: p.countryCode, name: p.country ?? p.countryCode, count: 0 };
-      c.count++;
-      counts.set(p.countryCode, c);
-    }
-    return [...counts.values()].sort((a, b) => b.count - a.count);
-  }, [places]);
+  const fitAll = () => { if (mapRef.current) fit(mapRef.current, placesRef.current); };
 
   // Create the map once.
   useEffect(() => {
     if (!containerRef.current) return;
+    const dark = prefersDark();
     const map = new maplibregl.Map({ container: containerRef.current, style: MAP_STYLE, center: [20, 25], zoom: 1.4, attributionControl: { compact: true } });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-left");
+    map.addControl(new FitAllControl(() => fit(map, placesRef.current)), "bottom-left");
     mapRef.current = map;
+    const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 18, className: "map-hover" });
 
     map.on("load", () => {
-      map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 48, clusterMaxZoom: 13 });
+      quietBasemap(map);
+      map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 50, clusterMaxZoom: 13 });
+      // Clusters: size by count (1–4 · 5–14 · 15–29 · 30+) with a soft translucent ring.
+      const size = ["step", ["get", "point_count"], 15, 5, 19, 15, 24, 30, 29] as unknown as number;
+      map.addLayer({
+        id: "cluster-ring", type: "circle", source: "places", filter: ["has", "point_count"],
+        paint: { "circle-color": CLUSTER, "circle-opacity": 0.2, "circle-radius": ["+", size, 7] as unknown as number },
+      });
       map.addLayer({
         id: "clusters", type: "circle", source: "places", filter: ["has", "point_count"],
-        paint: {
-          "circle-color": "#0f8a7e", "circle-opacity": 0.85, "circle-stroke-width": 3, "circle-stroke-color": "#ffffff",
-          "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 50, 30],
-        },
+        paint: { "circle-color": CLUSTER, "circle-radius": size, "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
       });
       map.addLayer({
         id: "cluster-count", type: "symbol", source: "places", filter: ["has", "point_count"],
-        layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 13, "text-font": ["Noto Sans Bold"] },
+        layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 13, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true },
         paint: { "text-color": "#ffffff" },
+      });
+      // Single places: category colour, soft halo, white outline. The selected one grows.
+      map.addLayer({
+        id: "place-halo", type: "circle", source: "places", filter: ["!", ["has", "point_count"]],
+        paint: { "circle-color": ["get", "color"], "circle-radius": 12, "circle-opacity": 0.18 },
       });
       map.addLayer({
         id: "place-points", type: "circle", source: "places", filter: ["!", ["has", "point_count"]],
         paint: {
-          "circle-color": ["get", "color"], "circle-radius": 8, "circle-stroke-width": 2.5, "circle-stroke-color": "#ffffff",
+          "circle-color": ["get", "color"], "circle-radius": 7, "circle-stroke-width": 2.5, "circle-stroke-color": "#ffffff",
           "circle-opacity": ["case", ["==", ["get", "status"], "notInterested"], 0.35, 1],
         },
       });
       map.addLayer({
+        id: "place-selected-shadow", type: "circle", source: "places", filter: ["==", ["get", "id"], ""],
+        paint: { "circle-color": "#000000", "circle-radius": 16, "circle-opacity": 0.22, "circle-blur": 0.9, "circle-translate": [0, 2] },
+      });
+      map.addLayer({
+        id: "place-selected", type: "circle", source: "places", filter: ["==", ["get", "id"], ""],
+        paint: { "circle-color": ["get", "color"], "circle-radius": 11, "circle-stroke-width": 3.5, "circle-stroke-color": "#ffffff" },
+      });
+      map.addLayer({
         id: "place-labels", type: "symbol", source: "places", filter: ["!", ["has", "point_count"]], minzoom: 9,
-        layout: { "text-field": ["get", "name"], "text-size": 12, "text-offset": [0, 1.3], "text-anchor": "top", "text-font": ["Noto Sans Regular"] },
-        paint: { "text-color": "#1c2128", "text-halo-color": "#ffffff", "text-halo-width": 1.5 },
+        layout: { "text-field": ["get", "name"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top", "text-font": ["Noto Sans Bold"], "text-max-width": 10 },
+        paint: { "text-color": dark ? "#f2f2f7" : "#1c1c1e", "text-halo-color": dark ? "#1c1c1e" : "#ffffff", "text-halo-width": 1.6 },
       });
 
       map.on("click", "clusters", async (e) => {
@@ -113,11 +144,19 @@ export function MapView() {
         const id = e.features?.[0]?.properties?.id;
         setSelected(placesRef.current.find((p) => p.id === id));
       });
+      map.on("mousemove", "clusters", (e) => {
+        const n = e.features?.[0]?.properties?.point_count;
+        const at = (e.features?.[0]?.geometry as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined;
+        if (n && at) hover.setLngLat(at).setHTML(`<b>${n}</b> saved places · click to zoom in`).addTo(map);
+      });
+      map.on("mouseleave", "clusters", () => hover.remove());
       for (const layer of ["clusters", "place-points"]) {
         map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
         map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
       }
+      map.on("moveend", () => setBounds(map.getBounds()));
       fit(map, placesRef.current);
+      setBounds(map.getBounds());
     });
     return () => map.remove();
   }, []);
@@ -129,12 +168,16 @@ export function MapView() {
     source?.setData(toGeoJSON(filtered));
   }, [filtered]);
 
-  const focusCountry = (code: string) => {
-    const next = country === code ? "" : code;
-    setCountry(next);
+  // Highlight the selected pin.
+  useEffect(() => {
     const map = mapRef.current;
-    if (map) fit(map, places.filter((p) => !next || p.countryCode === next));
-  };
+    if (!map?.getLayer("place-selected")) return;
+    const filter = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selected?.id ?? ""]] as maplibregl.FilterSpecification;
+    map.setFilter("place-selected", filter);
+    map.setFilter("place-selected-shadow", filter);
+  }, [selected]);
+
+  const filterCount = categories.length + statuses.length;
 
   return (
     <div className="map-wrap">
@@ -144,7 +187,7 @@ export function MapView() {
           <div className="map-search-wrap">
             <label className="map-search">
               <SearchIcon />
-              <input placeholder="Search places, cities, countries" value={search}
+              <input placeholder="Search your saved places" value={search}
                      onChange={(e) => { setSearch(e.target.value); setSuggestOpen(true); setActive(0); }}
                      onFocus={() => setSuggestOpen(true)}
                      onBlur={() => setTimeout(() => setSuggestOpen(false), 120)}
@@ -155,7 +198,7 @@ export function MapView() {
                        else if (e.key === "Enter") { e.preventDefault(); pick(suggestions[active]); }
                        else if (e.key === "Escape") setSuggestOpen(false);
                      }} />
-              {search && <button className="map-search-clear" aria-label="Clear search" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSearch(""); setCountry(""); }}>✕</button>}
+              {search && <button className="map-search-clear" aria-label="Clear search" onMouseDown={(e) => e.preventDefault()} onClick={() => setSearch("")}>✕</button>}
             </label>
             {suggestOpen && suggestions && (
               <div className="search-suggest" role="listbox">
@@ -180,33 +223,164 @@ export function MapView() {
               </div>
             )}
           </div>
-          <select value={category} onChange={(e) => setCategory(e.target.value as PlaceCategory | "")}>
-            <option value="">All kinds</option>
-            {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label}</option>)}
-          </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value as PersonalStatus | "")}>
-            <option value="">Any status</option>
-            {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
-          </select>
-          <span className="map-count">{filtered.length} place{filtered.length === 1 ? "" : "s"}</span>
+          <div className="map-filter-wrap">
+            <button className={`btn small ${filterCount ? "is-on" : ""}`} onClick={() => setFiltersOpen((o) => !o)}>
+              Filters{filterCount ? ` · ${filterCount}` : ""}
+            </button>
+            {filtersOpen && (
+              <FiltersPopover places={places} categories={categories} statuses={statuses}
+                              setCategories={setCategories} setStatuses={setStatuses} onClose={() => setFiltersOpen(false)} />
+            )}
+          </div>
+          <button className={`btn small ${areaOpen ? "is-on" : ""}`} onClick={() => setAreaOpen((o) => !o)} title="Saved places in the visible map area">
+            ☰ {inView.length === filtered.length ? `${filtered.length} places` : `${inView.length} of ${filtered.length} in view`}
+          </button>
           <button className="btn primary small" onClick={() => setAdding(true)}>＋ Add place</button>
         </div>
 
-        {countries.length > 0 && (
-          <div className="map-chip-row">
-            {countries.map((c) => (
-              <button key={c.code} className={`chip-btn ${country === c.code ? "active" : ""}`} onClick={() => focusCountry(c.code)} title={c.name}>
-                <Flag code={c.code} name={c.name} /> {c.count}
-              </button>
-            ))}
-          </div>
-        )}
+        {areaOpen && <AreaPanel places={inView} selectedId={selected?.id} map={mapRef.current}
+          onPick={(p) => { setSelected(p); mapRef.current?.easeTo({ center: [p.longitude, p.latitude], zoom: Math.max(mapRef.current.getZoom(), 12) }); }}
+          onClose={() => setAreaOpen(false)} onFitAll={fitAll} />}
       </div>
 
       {places.length === 0 && <Onboarding />}
 
       {selected && <MapPreview place={selected} onClose={() => setSelected(undefined)} onOpen={() => nav.openPlace(selected.id)} />}
       {adding && <QuickAddPlace onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+/** "Fit all places" button, grouped with the zoom buttons. */
+class FitAllControl implements maplibregl.IControl {
+  private el?: HTMLDivElement;
+  constructor(private onFit: () => void) {}
+  onAdd() {
+    this.el = document.createElement("div");
+    this.el.className = "maplibregl-ctrl maplibregl-ctrl-group";
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = "Fit all places";
+    b.setAttribute("aria-label", "Fit all places");
+    b.className = "fit-all-btn";
+    b.textContent = "⌖";
+    b.onclick = this.onFit;
+    this.el.appendChild(b);
+    return this.el;
+  }
+  onRemove() { this.el?.remove(); }
+}
+
+/** Status and kind of place, as toggles. Applies instantly. */
+function FiltersPopover({ places, categories, statuses, setCategories, setStatuses, onClose }: {
+  places: Place[]; categories: PlaceCategory[]; statuses: PersonalStatus[];
+  setCategories: (c: PlaceCategory[]) => void; setStatuses: (s: PersonalStatus[]) => void; onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const away = (e: MouseEvent) => { if (ref.current && !ref.current.parentElement?.contains(e.target as Node)) onClose(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+  }, [onClose]);
+  const count = <T extends string>(key: (p: Place) => T) => {
+    const m = new Map<T, number>();
+    places.forEach((p) => m.set(key(p), (m.get(key(p)) ?? 0) + 1));
+    return m;
+  };
+  const byCat = count((p) => p.category);
+  const byStatus = count((p) => p.personalStatus);
+  const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  return (
+    <div className="filters-popover" ref={ref}>
+      <div className="filters-section">
+        <h5>Status</h5>
+        <div className="filters-chips">
+          {(Object.keys(STATUS) as PersonalStatus[]).filter((s) => byStatus.has(s)).map((s) => (
+            <button key={s} className={`chip-btn ${statuses.includes(s) ? "active" : ""}`} onClick={() => setStatuses(toggle(statuses, s))}>
+              {STATUS[s].emoji} {STATUS[s].label} <span className="chip-count">{byStatus.get(s)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="filters-section">
+        <h5>Kind of place</h5>
+        <div className="filters-chips">
+          {[...byCat.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => (
+            <button key={c} className={`chip-btn ${categories.includes(c) ? "active" : ""}`} onClick={() => setCategories(toggle(categories, c))}>
+              <span className="cat-dot" style={{ background: CATEGORY[c]?.color }} /> {CATEGORY[c]?.label ?? c} <span className="chip-count">{n}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="filters-foot">
+        <button className="btn ghost small" disabled={categories.length + statuses.length === 0} onClick={() => { setCategories([]); setStatuses([]); }}>Clear</button>
+        <button className="btn small" onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Saved places in the visible map area. Grouped by country when several are in view, by city once you've
+ * zoomed into one country — so the list follows the map.
+ */
+function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll }: {
+  places: Place[]; selectedId?: string; map?: MLMap; onPick: (p: Place) => void; onClose: () => void; onFitAll: () => void;
+}) {
+  const countries = new Set(places.map((p) => p.countryCode ?? "?"));
+  const byCountry = countries.size > 1;
+  const groups = useMemo(() => {
+    const g = new Map<string, { label: string; code: string | null; items: Place[] }>();
+    for (const p of places) {
+      const key = byCountry ? p.countryCode ?? "?" : p.city ?? p.region ?? p.country ?? "Other";
+      const label = byCountry ? p.country ?? "Unknown country" : key;
+      const e = g.get(key) ?? { label, code: byCountry ? p.countryCode : null, items: [] };
+      e.items.push(p);
+      g.set(key, e);
+    }
+    return [...g.values()].sort((a, b) => b.items.length - a.items.length || a.label.localeCompare(b.label));
+  }, [places, byCountry]);
+
+  return (
+    <div className="area-panel">
+      <div className="area-head">
+        <div className="grow">
+          <div className="strong">{places.length} saved place{places.length === 1 ? "" : "s"} in view</div>
+          <div className="muted small">{byCountry ? `${groups.length} countries — pick one to zoom in` : "Grouped by city"}</div>
+        </div>
+        <button className="icon-btn small" title="Fit all places" onClick={onFitAll}>⌖</button>
+        <button className="icon-btn small" aria-label="Close" onClick={onClose}>✕</button>
+      </div>
+      <div className="area-list">
+        {places.length === 0 && <p className="muted small area-empty">No saved places here. Zoom out or press ⌖ to see them all.</p>}
+        {groups.map((g) => byCountry ? (
+          <button key={g.label} className="area-group-row" onClick={() => map && fit(map, g.items)}>
+            <Flag code={g.code} name={g.label} />
+            <span className="grow">{g.label}</span>
+            <span className="area-count">{g.items.length}</span>
+            <span className="area-chevron">›</span>
+          </button>
+        ) : (
+          <section key={g.label}>
+            <button className="area-city" onClick={() => map && fit(map, g.items)}>{g.label} <span>{g.items.length}</span></button>
+            {g.items.map((p) => {
+              const cat = CATEGORY[p.category] ?? CATEGORY.other;
+              return (
+                <button key={p.id} className={`area-place ${selectedId === p.id ? "active" : ""}`} onClick={() => onPick(p)}>
+                  <span className="area-dot" style={{ background: cat.color }} />
+                  <span className="grow area-place-text">
+                    <span className="area-place-name">{p.canonicalName}</span>
+                    <span className="area-place-sub">{cat.label} · {p.sourceCount} source{p.sourceCount === 1 ? "" : "s"}{p.memoryCount ? ` · 📷 ${p.memoryCount}` : ""}</span>
+                  </span>
+                  <span>{STATUS[p.personalStatus].emoji}</span>
+                </button>
+              );
+            })}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

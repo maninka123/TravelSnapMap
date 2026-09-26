@@ -87,6 +87,8 @@ For production, set **Settings → API base URL** to your own backend proxy so t
   Japanese, Chinese, Korean, Tamil and every other language Apple supports on your Mac (Sinhala isn't supported by
   Apple speech recognition — its caption and on-screen text are still used).
 
+- **🗺️ Map** — a quiet basemap so your places stand out; **Filters** (status, kind of place); **☰ In view** lists the saved
+  places in the visible area, grouped by country at world level and by city once you zoom into a country; **⌖** fits all.
 - **🔎 Search with suggestions** (Map) — as you type, matching places, cities and countries appear under the search
   field (↑/↓ and ↩ work); picking one flies the map there.
 - **＋ Add Place** — a place you know without a screenshot or Reel: search Apple Maps, pick the result, choose

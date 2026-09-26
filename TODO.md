@@ -99,3 +99,4 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Library schema v4 (visits + memories) with pre-migration backup; backups include your attached photos
 - [x] Settings: cost summary on top, standard prices automatic (custom under Advanced), grouped colour-coded diagnostics
 - [x] Map preview card redesigned (photo with title, category, status, Apple Maps button)
+- [x] Map redesign: quiet basemap (Positron/Dark, minor labels hidden), Filters popover, “In view” panel grouped by country → city, sized clusters with ring + hover, category pins with selected state, Fit-all control; country chip row removed

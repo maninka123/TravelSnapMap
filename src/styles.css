@@ -230,13 +230,6 @@ textarea { width: 100%; resize: vertical; min-height: 72px; line-height: 1.5; }
 .map-count { font-size: 12.5px; color: var(--muted); padding: 0 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* One horizontally scrolling row (examples or countries) — never wraps over the map */
-.map-chip-row { display: flex; gap: 6px; overflow-x: auto; max-width: 100%; align-self: flex-start; padding: 2px 2px 6px; scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
-.map-chip-row::-webkit-scrollbar { display: none; }
-.map-chip-row .chip-btn { flex: none; background: color-mix(in srgb, var(--surface) 86%, transparent); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--shadow-s); display: inline-flex; align-items: center; gap: 6px; }
-.map-chip-row .chip-btn.active { background: var(--accent); color: white; }
-
 /* Type-ahead suggestions under the search field: opaque, so the map never tints the text */
 .map-search-wrap { position: relative; }
 .search-suggest { position: absolute; top: calc(100% + 8px); left: 0; width: max(100%, 340px); max-height: min(60vh, 440px); overflow: auto; z-index: 5;
@@ -538,3 +531,42 @@ details.warnings-panel > summary { cursor: pointer; list-style: none; }
 .quick-add-picked { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--radius); background: var(--fill); }
 .segmented.wrap { flex-wrap: wrap; }
 .map-toolbar { position: relative; z-index: 3; }
+
+/* Map toolbar extras */
+.map-toolbar .btn.is-on { background: var(--accent-soft); color: var(--accent); }
+.map-filter-wrap { position: relative; }
+.filters-popover { position: absolute; top: calc(100% + 8px); left: 0; width: min(380px, 80vw); z-index: 6; padding: 14px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-l); display: flex; flex-direction: column; gap: 12px;
+  animation: materialize 160ms var(--ease-out); transform-origin: top left; }
+.filters-section h5 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.filters-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters-chips .chip-btn { display: inline-flex; align-items: center; gap: 5px; }
+.chip-count { opacity: 0.6; font-variant-numeric: tabular-nums; }
+.cat-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.filters-foot { display: flex; justify-content: space-between; border-top: 1px solid var(--separator); padding-top: 10px; }
+
+/* "In view" side panel: a slim list that follows the map */
+.area-panel { align-self: flex-start; width: min(300px, 100%); max-height: calc(100vh - 200px); display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--radius-l); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-l);
+  animation: materialize 200ms var(--ease-out); transform-origin: top left; }
+.area-head { display: flex; align-items: center; gap: 6px; padding: 12px 12px 10px 14px; border-bottom: 1px solid var(--separator); }
+.area-list { overflow: auto; padding: 4px 6px 8px; }
+.area-empty { padding: 10px 8px; margin: 0; }
+.area-group-row, .area-place, .area-city { width: 100%; display: flex; align-items: center; gap: 9px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 9px; }
+.area-group-row { padding: 8px 8px; font-size: 13.5px; }
+.area-group-row:hover, .area-place:hover { background: var(--fill); }
+.area-count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.area-chevron { color: var(--muted); opacity: 0.6; }
+.area-city { padding: 10px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.area-city span { font-weight: 500; opacity: 0.7; }
+.area-place { padding: 6px 8px; }
+.area-place.active { background: var(--accent-soft); }
+.area-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px currentColor; color: var(--fill-strong); }
+.area-place-text { display: flex; flex-direction: column; min-width: 0; }
+.area-place-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.area-place-sub { font-size: 11.5px; color: var(--muted); }
+
+/* Map controls and hover label */
+.fit-all-btn { font-size: 17px; line-height: 1; }
+.map-hover .maplibregl-popup-content { padding: 5px 9px; border-radius: 8px; font-size: 12px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.map-hover .maplibregl-popup-tip { display: none; }

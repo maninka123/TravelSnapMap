@@ -5,7 +5,7 @@ import type { Fact, Place, PlaceDetail as Detail, PlaceWarning } from "../../api
 import { ErrorNote, Modal, PlaceLine, PlaceSearchDialog, Pill, Thumb } from "../../components/common";
 import { CATEGORY, FACT, formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
-import { MAP_STYLE } from "../map/MapView";
+import { MAP_STYLE, quietBasemap } from "../map/MapView";
 import { MyVisit } from "./MyVisit";
 
 export function PlaceDetail({ id }: { id: string }) {
@@ -173,6 +173,7 @@ function MiniMap({ place }: { place: Place }) {
     if (!ref.current) return;
     const map = new maplibregl.Map({ container: ref.current, style: MAP_STYLE, center: [place.longitude, place.latitude], zoom: 13, interactive: true, attributionControl: false });
     new maplibregl.Marker({ color: CATEGORY[place.category]?.color }).setLngLat([place.longitude, place.latitude]).addTo(map);
+    map.on("load", () => quietBasemap(map));
     return () => map.remove();
   }, [place.latitude, place.longitude, place.category]);
   return (
