@@ -86,7 +86,8 @@ export function MapView() {
     const map = mapRef.current;
     const inScope = places.filter((p) => !next || (next.kind === "country" ? p.countryCode === next.key : p.city === next.key));
     // A city: zoom in past the clustering level so every place shows with its own icon.
-    if (map) fit(map, inScope, next?.kind === "city" ? CITY_ZOOM : undefined);
+    // A country whose places sit close together (e.g. Sri Lanka): zoom just past clustering so all show.
+    if (map) fit(map, inScope, next?.kind === "city" ? CITY_ZOOM : next?.kind === "country" ? "compact" : undefined);
   };
 
   const pick = (s: Suggestion) => {
@@ -448,7 +449,7 @@ function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll, onCount
       <div className="area-list">
         {places.length === 0 && <p className="muted small area-empty">No saved places here. Zoom out or press ⌖ to see them all.</p>}
         {groups.map((g) => byCountry ? (
-          <button key={g.label} className="area-group-row" onClick={() => (g.code && onCountry ? onCountry(g.code, g.label) : map && fit(map, g.items))}>
+          <button key={g.label} className="area-group-row" onClick={() => (g.code && onCountry ? onCountry(g.code, g.label) : map && fit(map, g.items, "compact"))}>
             <Flag code={g.code} name={g.label} />
             <span className="grow">{g.label}</span>
             <span className="area-count">{g.items.length}</span>
@@ -620,17 +621,23 @@ const CLUSTER_MAX_ZOOM = 6;
 /** Picking a city zooms at least this close (well past clustering). */
 const CITY_ZOOM = 10;
 
-function fit(map: MLMap, places: Place[], minZoom?: number) {
+/** Places this close together (they'd fit at ≥ this zoom) are shown individually rather than clustered. */
+const COMPACT_ZOOM = CLUSTER_MAX_ZOOM - 1.5;
+
+/** Fits the map to places. `minZoom` = zoom at least this close; "compact" = past clustering if the places are close together. */
+function fit(map: MLMap, places: Place[], minZoom?: number | "compact") {
   if (places.length === 0) return;
   if (places.length === 1) {
-    map.easeTo({ center: [places[0].longitude, places[0].latitude], zoom: Math.max(12, minZoom ?? 0) });
+    map.easeTo({ center: [places[0].longitude, places[0].latitude], zoom: Math.max(12, typeof minZoom === "number" ? minZoom : 0) });
     return;
   }
   const bounds = new maplibregl.LngLatBounds();
   places.forEach((p) => bounds.extend([p.longitude, p.latitude]));
   const camera = map.cameraForBounds(bounds, { padding: 80, maxZoom: 14 });
   if (!camera) return;
-  map.easeTo({ ...camera, zoom: Math.max(camera.zoom ?? 0, minZoom ?? 0), duration: 600 });
+  const zoom = camera.zoom ?? 0;
+  const floor = minZoom === "compact" ? (zoom >= COMPACT_ZOOM ? CLUSTER_MAX_ZOOM + 1 : 0) : minZoom ?? 0;
+  map.easeTo({ ...camera, zoom: Math.max(zoom, floor), duration: 600 });
 }
 
 /** First-run guidance: permission → AI key → scan. */
