@@ -288,9 +288,7 @@ export interface AppConfig {
   maxKeyframes: number;
   ytDlpPath: string;
   cookiesFromBrowser: string;
-  priceInputCacheMissPerMillion: number;
-  priceInputCacheHitPerMillion: number;
-  priceOutputPerMillion: number;
+  pricing: Pricing;
 }
 
 export interface Settings {
@@ -460,3 +458,13 @@ export interface RunReport {
 }
 
 export interface SpeechLocale { id: string; name: string; onDevice: boolean; engine: string }
+
+export interface Rates { inputCacheHit: number; inputCacheMiss: number; output: number }
+/** Estimated AI cost settings (DeepSeek bills peak and off-peak hours differently). */
+export interface Pricing {
+  mode: "timeOfDay" | "peak" | "offPeak";
+  peak: Rates;
+  offPeak: Rates;
+  peakHoursUtc: [number, number][];
+  source: string;
+}

@@ -233,3 +233,37 @@ impl Database {
         }))
     }
 }
+
+impl Database {
+    /// Recalculates every *estimated* cost from the stored token counts (which never change) using the
+    /// current pricing. Per-request log rows use their own timestamp (peak/off-peak); per-screenshot and
+    /// per-Reel totals don't record the cache split, so they count all input as cache misses (an upper bound).
+    pub fn recompute_estimated_costs(&self, pricing: &crate::config::Pricing) -> Result<()> {
+        use chrono::{DateTime, Utc};
+        let parse = |s: &str| DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now());
+        self.transaction(|tx| {
+            let rows: Vec<(i64, i64, i64, i64, String)> = {
+                let mut stmt = tx.prepare("SELECT id, input_tokens, cache_hit_tokens, output_tokens, created_at FROM ai_usage_log")?;
+                let r = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
+                r.collect::<rusqlite::Result<_>>()?
+            };
+            for (id, input, hit, output, at) in rows {
+                let cost = pricing.estimate((input - hit).max(0) as u64, hit.max(0) as u64, output.max(0) as u64, parse(&at));
+                tx.execute("UPDATE ai_usage_log SET cost = ?2 WHERE id = ?1", params![id, cost])?;
+            }
+            for table in ["screenshots", "reels"] {
+                let date_col = if table == "screenshots" { "COALESCE(processed_at, discovered_at)" } else { "COALESCE(processed_at, created_at)" };
+                let rows: Vec<(String, i64, i64, String)> = {
+                    let mut stmt = tx.prepare(&format!("SELECT id, ai_input_tokens, ai_output_tokens, {date_col} FROM {table} WHERE ai_input_tokens > 0"))?;
+                    let r = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+                    r.collect::<rusqlite::Result<_>>()?
+                };
+                for (id, input, output, at) in rows {
+                    let cost = pricing.estimate(input.max(0) as u64, 0, output.max(0) as u64, parse(&at));
+                    tx.execute(&format!("UPDATE {table} SET ai_cost = ?2 WHERE id = ?1"), params![id, cost])?;
+                }
+            }
+            Ok(())
+        })
+    }
+}

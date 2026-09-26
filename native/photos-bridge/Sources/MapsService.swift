@@ -32,21 +32,21 @@ enum MapsService {
         }
 
         return response.mapItems.prefix(limit).map { item in
-            let reps = item.addressRepresentations
-            let coordinate = item.location.coordinate
+            let place = details(item)
+            let coordinate = place.location.coordinate
             var out: [String: Any] = [
-                "name": item.name ?? reps?.cityName ?? query,
+                "name": item.name ?? place.city ?? query,
                 "latitude": coordinate.latitude,
                 "longitude": coordinate.longitude,
             ]
-            out["address"] = item.address?.shortAddress ?? item.address?.fullAddress
-            out["city"] = reps?.cityName
-            out["region"] = reps?.cityWithContext
-            out["country"] = reps?.regionName
-            out["countryCode"] = reps?.region?.identifier
+            out["address"] = place.address
+            out["city"] = place.city
+            out["region"] = place.region
+            out["country"] = place.country
+            out["countryCode"] = place.countryCode
             out["mapIdentifier"] = item.identifier?.rawValue
             // Lets the ranking tell "near the place the screenshot talks about" even when Maps omits the country.
-            out["nearDistanceKm"] = center.map { item.location.distance(from: $0) / 1000 }
+            out["nearDistanceKm"] = center.map { place.location.distance(from: $0) / 1000 }
             out["category"] = item.pointOfInterestCategory?.rawValue.replacingOccurrences(of: "MKPOICategory", with: "")
             return out.compactMapValues { $0 }
         }
@@ -61,8 +61,37 @@ enum MapsService {
         guard let item = try await MKLocalSearch(request: request).start().mapItems.first else { return nil }
         let isCity = near.contains(",")
         let span = isCity ? 1.0 : 15.0
-        let region = MKCoordinateRegion(center: item.location.coordinate, span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))
+        let region = MKCoordinateRegion(center: details(item).location.coordinate, span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))
         await cache.set(near, region)
         return region
+    }
+}
+
+extension MapsService {
+    struct Details {
+        var location: CLLocation
+        var address: String?
+        var city: String?
+        var region: String?
+        var country: String?
+        var countryCode: String?
+    }
+
+    /// Location and address of a result. macOS 26 has `location`/`address`/`addressRepresentations`;
+    /// earlier versions use the (since-deprecated) `placemark`, which carries the same information.
+    static func details(_ item: MKMapItem) -> Details {
+        if #available(macOS 26.0, *) {
+            let reps = item.addressRepresentations
+            return Details(location: item.location, address: item.address?.shortAddress ?? item.address?.fullAddress,
+                           city: reps?.cityName, region: reps?.cityWithContext, country: reps?.regionName,
+                           countryCode: reps?.region?.identifier)
+        }
+        let p = item.placemark
+        let street = [p.subThoroughfare, p.thoroughfare].compactMap { $0 }.joined(separator: " ")
+        let address = [street.isEmpty ? nil : street, p.locality].compactMap { $0 }.joined(separator: ", ")
+        return Details(location: p.location ?? CLLocation(latitude: p.coordinate.latitude, longitude: p.coordinate.longitude),
+                       address: address.isEmpty ? nil : address, city: p.locality,
+                       region: [p.locality, p.administrativeArea, p.country].compactMap { $0 }.joined(separator: ", "),
+                       country: p.country, countryCode: p.isoCountryCode)
     }
 }

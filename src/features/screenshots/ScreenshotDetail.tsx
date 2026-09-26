@@ -105,7 +105,8 @@ export function ScreenshotDetail({ id, highlight }: { id: string; highlight?: st
               <span>Travel confidence</span><span>{pct(s.travelConfidence)} (local {pct(s.localTravelScore)})</span>
               <span>Level</span><span>{["—", "Local only", "AI", "AI + thinking"][s.escalationLevel] ?? s.escalationLevel}</span>
               {s.aiModel && <><span>AI model</span><span>{s.aiModel}{s.aiThinking ? " · thinking" : ""}{s.aiImageUsed ? " · image sent" : " · text only"}</span></>}
-              {s.aiModel && <><span>Tokens</span><span>{s.aiInputTokens} in · {s.aiOutputTokens} out · ${s.aiCost.toFixed(5)}</span></>}
+              {s.aiModel && <><span>Tokens</span><span>{s.aiInputTokens} in · {s.aiOutputTokens} out</span>
+              <span>Estimated AI cost</span><span>${s.aiCost.toFixed(5)}</span></>}
               {s.aiLatencyMs > 0 && <><span>AI latency</span><span>{(s.aiLatencyMs / 1000).toFixed(1)} s{s.aiRetryCount ? ` · ${s.aiRetryCount} retries` : ""}</span></>}
             </div>
           </div>

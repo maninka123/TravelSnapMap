@@ -1,5 +1,6 @@
 //! TravelSnapMap backend: Tauri app setup and dependency wiring.
 
+mod backup;
 mod commands;
 mod config;
 mod countries;
@@ -39,6 +40,13 @@ fn load_env() {
     }
 }
 
+/// A native alert for errors that happen before the window exists (e.g. a failed library upgrade).
+fn fatal_alert(title: &str, message: &str) {
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!("display alert \"{}\" message \"{}\" as critical", esc(title), esc(message));
+    let _ = std::process::Command::new("osascript").arg("-e").arg(script).status();
+}
+
 /// Logs to ~/Library/Logs/TravelSnapMap/travelsnapmap.log (rotated at 5 MB) and to stderr in development.
 /// Screenshot contents are never logged.
 fn init_logging() {
@@ -69,8 +77,25 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let db = Arc::new(Database::open(&data_dir.join("travelsnapmap.sqlite"))?);
+            let db = match Database::open(&data_dir.join("travelsnapmap.sqlite")) {
+                Ok(db) => Arc::new(db),
+                Err(e) => {
+                    log::error!("could not open library: {e:#}");
+                    fatal_alert("TravelSnapMap can't open your library", &e.to_string());
+                    std::process::exit(1);
+                }
+            };
+            // None = never saved (fresh install); Some(0) = saved before settings were versioned.
+            let saved_version = db.setting("config")?.map(|s| serde_json::from_str::<serde_json::Value>(&s).ok()
+                .and_then(|v| v["configVersion"].as_u64()).unwrap_or(0));
             let config = db.config();
+            if saved_version.is_some_and(|v| v < config::CONFIG_VERSION as u64) {
+                // Settings from an older build: persist the upgrade and refresh cost estimates once.
+                db.save_config(&config)?;
+                if let Err(e) = db.recompute_estimated_costs(&config.pricing) {
+                    log::warn!("could not recompute estimated costs: {e}");
+                }
+            }
             // Older builds stored a pasted key in SQLite: move it to the Keychain and delete the plain copy.
             if let Some(old) = db.setting("deepseekApiKey")? {
                 if secrets::set_deepseek_key(Some(&old)).is_ok() {
@@ -203,6 +228,8 @@ pub fn run() {
             commands::run_report,
             commands::retranscribe_reel,
             commands::speech_locales,
+            commands::backup_library,
+            commands::export_places,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TravelSnapMap");

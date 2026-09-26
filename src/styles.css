@@ -389,3 +389,8 @@ audio { width: 100%; }
   :root { --separator: rgba(0, 0, 0, 0.4); --border: rgba(0, 0, 0, 0.5); --muted: rgba(0, 0, 0, 0.75); }
   .card, .tile, .list, .info-card, .stat, .candidate, .btn { border: 1px solid var(--border); }
 }
+
+.price-table { width: 100%; border-collapse: collapse; margin: 4px 0 10px; font-variant-numeric: tabular-nums; }
+.price-table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+.price-table td { padding: 3px 6px; }
+.price-table input { width: 100%; }

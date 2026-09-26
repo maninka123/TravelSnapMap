@@ -16,7 +16,7 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Processing pipeline with persisted states, restart recovery, AI cache, offline parking
 - [x] Processing queue: concurrency, pause / resume / cancel, progress events
 - [x] Review actions (travel?, which place?, duplicate?, photo crop?, failures)
-- [x] Rust tests: 42 passing (decoding, scoring, dedupe, crops, states, full pipeline with mocks)
+- [x] Rust tests (now 74 + 3 opt-in live tests)
 
 ## Milestone B — React UI
 - [x] App shell, navigation, processing bar, onboarding
@@ -37,12 +37,11 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Fallback: "Import Video from Photos" when Instagram media isn't accessible
 - [x] UI: paste-URL import, Reels in the Sources library, Reel detail (video, saved voice audio, timestamped transcript, key snapshots)
 - [x] Place info cards (Best Time, Getting There, Tickets & Cost, …) with a source on every fact
-- [x] Tests for Reel pipeline (52 Rust tests passing in total)
+- [x] Tests for Reel pipeline
 
 ## Milestone D — Ship
 - [x] Run the app (`npm run tauri dev`) — launches cleanly, DB migrates, bridge starts
 - [x] Live end-to-end check: real Vision OCR → DeepSeek → Apple Maps → SQLite ($0.0001 per screenshot)
-- [ ] Scan your real Photos library (needs you to click "Allow" for Photos access)
 - [x] README (setup, architecture, privacy, cost controls)
 - [x] `.gitignore` (secrets, build output)
 - [x] Push to GitHub (github.com/maninka123/TravelSnapMap)
@@ -58,8 +57,8 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Security: DeepSeek key in macOS Keychain (migrated from SQLite); production CSP (dev keeps a relaxed one for hot reload)
 - [x] Fix: macOS killed the helper on permission requests in dev (TCC "responsible process") — helper now requests permissions itself
 - [x] UI restyled with the Apple design framework (apple-design skill installed permanently)
-- [x] Real test: 100 real screenshots (random sample) — 0 failures, 81% place auto-resolution, ~$0.011 per 100
-- [x] Real test: 15 real Instagram Reels — 0 failures, 14/15 usable (1 login-only → "import from Photos"), 42 places (39 verified), $0.0031 total
+- [x] Real test: 100 real screenshots (random sample) — 0 failures, 81% place auto-resolution, est. $0.018–0.037 per 100 at official rates
+- [x] Real test: 15 real Instagram Reels — 0 failures, 14/15 usable (1 login-only → "import from Photos"), 42 places (39 verified), est. $0.005–0.010 total
 - [x] Fix issues found in real testing (each one has a regression test):
   - [x] Local filter missed real travel posts (e.g. Wangxian Valley TikTok, restaurant with street address) → recall improved
   - [x] Countries/continents extracted as "places" → dropped
@@ -77,3 +76,11 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Speed: one yt-dlp call, audio and keyframes in parallel, concurrent OCR, 2-pass keyframes (Reel ~42 s → ~20 s)
 - [x] Output tokens −33 % (short reason, no redundant quotes); cost ≈ $0.011 per 100 screenshots
 - [x] Production: error boundaries, log file, Keychain, strict CSP, per-stage timings
+
+## Milestone F — Safe for long-term use (v0.2.1)
+- [x] Estimated AI cost: official deepseek-flash peak/off-peak pricing, configurable, estimates recalculated from stored tokens
+- [x] GitHub Actions CI (npm ci, typecheck, build, cargo test) — no Photos/DeepSeek/MapKit needed
+- [x] Backup TravelSnapMap (.zip, never the API key); Export Places as JSON / GeoJSON
+- [x] Pre-migration backups + transactional migrations with a clear error on failure
+- [x] Minimum macOS lowered to 15 with fallbacks for the two macOS-26-only APIs
+- [x] Docs updated (pricing, benchmarks, test count)

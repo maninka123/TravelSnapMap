@@ -113,8 +113,8 @@ export function RunReportView({ report }: { report: RunReport }) {
     ["Avg OCR time", `${Math.round(report.avgOcrMs)} ms`],
     ["Avg AI time", report.avgAiMs ? `${(report.avgAiMs / 1000).toFixed(1)} s` : "—"],
     ["Avg total / screenshot", `${(report.avgTotalMs / 1000).toFixed(1)} s`],
-    ["Estimated DeepSeek cost", `$${report.totalCost.toFixed(4)}`],
-    ["Cost per travel screenshot", report.travel ? `$${report.costPerTravelScreenshot.toFixed(5)}` : "—"],
+    ["Estimated AI cost", `$${report.totalCost.toFixed(4)}`],
+    ["Estimated AI cost per travel screenshot", report.travel ? `$${report.costPerTravelScreenshot.toFixed(5)}` : "—"],
     ["Tokens", `${report.inputTokens.toLocaleString()} in / ${report.outputTokens.toLocaleString()} out`],
   ];
   return (
@@ -140,7 +140,7 @@ export function RunReportView({ report }: { report: RunReport }) {
                 <div className="muted small">{formatDate(r.creationDate)} · {SOURCE[r.sourceType]} · {r.escalationLevel === 1 ? "local only" : `AI ${pct(r.travelConfidence)}`}
                   {r.statusDetail ? ` · ${r.statusDetail}` : ""}</div>
               </div>
-              <span className="muted small">{(r.pipelineMs / 1000).toFixed(1)} s{r.aiCost ? ` · $${r.aiCost.toFixed(5)}` : ""}</span>
+              <span className="muted small">{(r.pipelineMs / 1000).toFixed(1)} s{r.aiCost ? ` · est. $${r.aiCost.toFixed(5)}` : ""}</span>
             </div>
           );
         })}

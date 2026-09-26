@@ -30,7 +30,7 @@ The **Place** is the central object. Screenshots and Reels are evidence attached
 
 ## Quick start
 
-Requirements (macOS 26+):
+Requirements (macOS 15 Sequoia or later; macOS 26+ recommended):
 
 | Tool | Install |
 |---|---|
@@ -95,7 +95,7 @@ Measured on this Mac with the real pipeline (Vision OCR → local filter → Dee
 | Handled locally, no AI call | 42 % | — |
 | Places auto-resolved | 81 % | 39 of 42 places (93 %) |
 | Average time | 0.9 s OCR · 2.6 s AI · 3.7 s total | 8–37 s per Reel (75 s for a 19-place itinerary) |
-| DeepSeek cost | **≈ $0.011 per 100 screenshots** | **≈ $0.0002 per Reel** ($0.0031 for all 15) |
+| Estimated AI cost (official deepseek-flash rates) | **$0.018 off-peak – $0.037 peak per 100 screenshots** | **$0.0003–$0.0007 per Reel** |
 
 Each issue found in these runs became a regression test (`cargo test`), e.g. a travel TikTok the local filter missed,
 a place Maps returned without a country, a Kyoto spa matched to a Gion in Hiroshima, and Reels with many places that
@@ -151,7 +151,9 @@ Paste a Reel/Post link (**Sources → Import Reel**):
   cost per travel screenshot and per place, per-stage timings.
 
 A real run on a sample screenshot ("Lake Kawaguchi… Best view of Mount Fuji around sunrise. Take the train from
-Shinjuku.") cost ~584 input + 208 output tokens ≈ **$0.0001** with the default price settings.
+Shinjuku.") used ~584 input + 208 output tokens ≈ **$0.0002–0.0004 estimated AI cost**.
+
+**Pricing assumptions** (Settings → Estimated AI cost, editable): deepseek-flash per 1M tokens — peak $0.30 input (cache miss) / $0.006 (cache hit) / $1.20 output; off-peak half. Peak = Mon–Fri 01:00–04:00 and 06:00–10:00 UTC (Chinese public holidays not modelled). Token counts are stored exactly; estimates are recalculated when pricing changes.
 
 ### Privacy
 - OCR, speech transcription, photo detection and map matching run on your Mac.
@@ -180,13 +182,23 @@ TODO.md                   Build progress checklist
 ## Tests
 
 ```bash
-cd src-tauri && cargo test          # 65 tests: decoding, scoring, dedupe, crops, states, full pipelines with mocks, real-data regressions
+cd src-tauri && cargo test          # 74 tests (+3 opt-in live tests): pipelines with mocks, real-data regressions, migrations, backup, pricing
 # Live checks (use your key; tiny cost):
 TSM_LIVE_IMAGE=/path/to/screenshot.jpg cargo test live_screenshot -- --ignored --nocapture
 TSM_LIVE_COUNT=100 TSM_LIVE_DB=/tmp/v.sqlite cargo test live_photos -- --ignored --nocapture   # real Photos sample
 TSM_LIVE_REELS=urls.txt TSM_LIVE_DB=/tmp/r.sqlite cargo test live_reels -- --ignored --nocapture   # real Reels
 npm run build                       # type-check + production frontend build
 ```
+
+## Backup, export and safety
+
+- **Settings → Backup TravelSnapMap**: a .zip with the database snapshot, place photos/crops, thumbnails, Reel audio/key snapshots and config.json. Never the API key (Keychain only). Restore steps are in the zip's README.txt.
+- **Export Places as JSON / GeoJSON** (GeoJSON = verified places with name, city, country, category, status, notes, source count).
+- Before any schema migration the library is copied to `backups/pre-migration-*.sqlite`; each step is one transaction, so a failed upgrade leaves the original intact and shows a clear message.
+
+## macOS version
+
+Minimum **macOS 15**. Only two features use macOS 26 APIs, with fallbacks: Apple Maps address details (`MKMapItem.location/address/addressRepresentations` → `placemark` on 15) and on-device Reel transcription (`SpeechTranscriber`/`SpeechAnalyzer` → `SFSpeechRecognizer` on 15, fewer on-device languages). Vision OCR, Photos and MapKit search need only macOS 15. Building requires the macOS 26 SDK. CI: GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Notes & limits
 - `ocr_blocks` are SQLite rows; OCR for the whole library stays local.

@@ -31,36 +31,95 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
-const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 3;
+
+/// (schema version reached, SQL). Append new steps; never edit a shipped one.
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("schema.sql")),
+    (2, include_str!("migration_v2.sql")),
+    (3, include_str!("migration_v3.sql")),
+];
+
+/// Library open failures, worded for people rather than developers.
+#[derive(Debug, thiserror::Error)]
+pub enum OpenError {
+    #[error("This library was created by a newer version of TravelSnapMap (library v{found}; this app supports up to v{supported}). Please update the app.")]
+    TooNew { found: i64, supported: i64 },
+    #[error("TravelSnapMap couldn't upgrade your library (step v{to}, starting from v{from}): {reason}.\n\nNothing was changed: your original library is intact{backup}. Please report this problem.")]
+    MigrationFailed { from: i64, to: i64, reason: String, backup: String },
+    #[error("TravelSnapMap couldn't make a safety copy of your library before upgrading it ({0}), so it didn't upgrade. Check free disk space and try again.")]
+    BackupFailed(String),
+}
 
 impl Database {
+    /// Opens (and if needed upgrades) the library. Before any schema migration the database is copied to
+    /// `backups/pre-migration-v{old}-to-v{new}-{time}.sqlite`; each migration step is one transaction, so a
+    /// failure leaves the original library exactly as it was.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        Self::init(Connection::open(path)?)
+        let mut conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version > SCHEMA_VERSION {
+            return Err(OpenError::TooNew { found: version, supported: SCHEMA_VERSION }.into());
+        }
+        let backup = if version > 0 && version < SCHEMA_VERSION {
+            Some(Self::backup_before_migration(&conn, path, version)?)
+        } else {
+            None
+        };
+        if let Err((failed_step, reason)) = Self::migrate(&mut conn, version) {
+            return Err(OpenError::MigrationFailed {
+                from: version,
+                to: failed_step,
+                reason: reason.to_string(),
+                backup: backup.map(|b| format!(", and a copy was saved at {}", b.display())).unwrap_or_default(),
+            }
+            .into());
+        }
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory()?)
+        let mut conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        Self::migrate(&mut conn, 0).map_err(|(_, e)| anyhow::anyhow!(e))?;
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
-    fn init(conn: Connection) -> Result<Self> {
-        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        // Forward-only migrations; each step runs once.
-        if version < 1 {
-            conn.execute_batch(include_str!("schema.sql"))?;
-            conn.execute_batch("PRAGMA user_version = 1")?;
+    /// Forward-only migrations, each in its own transaction (rolled back automatically on error).
+    fn migrate(conn: &mut Connection, from: i64) -> std::result::Result<(), (i64, rusqlite::Error)> {
+        fn apply(conn: &mut Connection, step: i64, sql: &str) -> rusqlite::Result<()> {
+            let tx = conn.transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", step)?;
+            tx.commit() // dropping `tx` on error rolls the whole step back
         }
-        if version < 2 {
-            conn.execute_batch(&format!("BEGIN; {} PRAGMA user_version = 2; COMMIT;", include_str!("migration_v2.sql")))?;
+        for (step, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > from) {
+            apply(conn, *step, sql).map_err(|e| (*step, e))?;
         }
-        if version < 3 {
-            conn.execute_batch(&format!("BEGIN; {} PRAGMA user_version = 3; COMMIT;", include_str!("migration_v3.sql")))?;
-        }
-        debug_assert!(SCHEMA_VERSION == 3);
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(())
+    }
+
+    /// Consistent snapshot of the open database (VACUUM INTO) — safe while the app is running.
+    pub fn snapshot_to(&self, dest: &Path) -> Result<()> {
+        let _ = std::fs::remove_file(dest);
+        self.with(|c| c.execute("VACUUM INTO ?1", [dest.to_string_lossy()]))?;
+        Ok(())
+    }
+
+    /// Consistent copy of the database (works while it's open) next to it, in `backups/`.
+    fn backup_before_migration(conn: &Connection, path: &Path, from: i64) -> Result<std::path::PathBuf> {
+        let dir = path.parent().unwrap_or(Path::new(".")).join("backups");
+        std::fs::create_dir_all(&dir)?;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let dest = dir.join(format!("pre-migration-v{from}-to-v{SCHEMA_VERSION}-{stamp}.sqlite"));
+        conn.execute("VACUUM INTO ?1", [dest.to_string_lossy()])
+            .map_err(|e| OpenError::BackupFailed(e.to_string()))?;
+        log::info!("library backed up before migration to {}", dest.display());
+        Ok(dest)
     }
 
     /// Runs a closure with the connection. Keep closures short: never hold across `.await`.
@@ -218,4 +277,47 @@ pub struct Diagnostics {
     pub ai_average_latency_ms: f64,
     pub open_reviews: i64,
     pub metrics: Vec<(String, f64)>,
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn migrations_end_at_the_schema_version() {
+        assert_eq!(MIGRATIONS.last().unwrap().0, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn failed_upgrade_keeps_the_original_library_and_a_backup() {
+        let dir = std::env::temp_dir().join(format!("tsm-migrate-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("travelsnapmap.sqlite");
+        {
+            let db = Database::open(&path).unwrap();
+            db.set_setting("marker", Some("my data")).unwrap();
+            // Pretend this library is one version older: re-running v3 then fails ("duplicate column").
+            db.with(|c| c.execute_batch("PRAGMA user_version = 2")).unwrap();
+        }
+        let err = Database::open(&path).err().expect("upgrade must fail").to_string();
+        assert!(err.contains("original library is intact") && err.contains("pre-migration-v2-to-v3"), "{err}");
+
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let marker: String = conn.query_row("SELECT value FROM settings WHERE key = 'marker'", [], |r| r.get(0)).unwrap();
+        assert_eq!((version, marker.as_str()), (2, "my data"), "the failed step was rolled back");
+        let backups: Vec<_> = std::fs::read_dir(dir.join("backups")).unwrap().collect();
+        assert_eq!(backups.len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn newer_library_is_refused_without_changes() {
+        let dir = std::env::temp_dir().join(format!("tsm-newer-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("travelsnapmap.sqlite");
+        std::fs::create_dir_all(&dir).unwrap();
+        Connection::open(&path).unwrap().execute_batch("PRAGMA user_version = 99").unwrap();
+        let err = Database::open(&path).err().unwrap().to_string();
+        assert!(err.contains("newer version"), "{err}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

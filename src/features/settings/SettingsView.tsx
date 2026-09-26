@@ -3,6 +3,7 @@ import { AppService, PhotoLibraryService, ProcessingService, ReelService, Settin
 import type { AppConfig, RunReport } from "../../api/types";
 import { ErrorNote, Modal } from "../../components/common";
 import { RunReportView } from "../../components/ScanControls";
+import { BackupCard } from "./BackupCard";
 import { formatDate } from "../../lib/labels";
 import { useAction, useLoad } from "../../lib/nav";
 
@@ -132,12 +133,38 @@ export function SettingsView() {
             <span className="hint">Some Reels need you to be logged in. Cookies are read locally by yt-dlp and never sent to DeepSeek.</span></div>
         </div>
 
+        <BackupCard />
+
         <div className="card">
-          <h3>Cost estimate (USD per 1M tokens)</h3>
-          <div className="field"><label>Input (cache miss)</label>{num("priceInputCacheMissPerMillion", 0.01)}</div>
-          <div className="field"><label>Input (cache hit)</label>{num("priceInputCacheHitPerMillion", 0.001)}</div>
-          <div className="field"><label>Output</label>{num("priceOutputPerMillion", 0.01)}</div>
-          <span className="hint small muted">Check DeepSeek's pricing page and update these for accurate estimates.</span>
+          <h3>Estimated AI cost</h3>
+          <p className="muted small">
+            An estimate only — DeepSeek bills from its own records. Token counts are stored exactly; estimates are
+            recalculated when you change these prices. Defaults: {config.pricing.source}.
+          </p>
+          <div className="field"><label>Pricing</label>
+            <select value={config.pricing.mode} onChange={(e) => set("pricing", { ...config.pricing, mode: e.target.value as typeof config.pricing.mode })}>
+              <option value="timeOfDay">By time of day (peak Mon–Fri {config.pricing.peakHoursUtc.map(([s, e]) => `${s}:00–${e}:00`).join(", ")} UTC)</option>
+              <option value="peak">Always peak (conservative)</option>
+              <option value="offPeak">Always off-peak</option>
+            </select>
+          </div>
+          <table className="price-table">
+            <thead><tr><th>USD per 1M tokens</th><th>Peak</th><th>Off-peak</th></tr></thead>
+            <tbody>
+              {([["inputCacheMiss", "Input (cache miss)"], ["inputCacheHit", "Input (cache hit)"], ["output", "Output"]] as const).map(([key, label]) => (
+                <tr key={key}>
+                  <td>{label}</td>
+                  {(["peak", "offPeak"] as const).map((window) => (
+                    <td key={window}>
+                      <input type="number" step={0.001} min={0} value={config.pricing[window][key]}
+                             onChange={(e) => set("pricing", { ...config.pricing, [window]: { ...config.pricing[window], [key]: Number(e.target.value) } })} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <span className="hint small muted">Chinese public holidays are billed off-peak by DeepSeek but aren't modelled, so estimates for those days are slightly high.</span>
         </div>
       </div>
 
@@ -167,9 +194,9 @@ export function SettingsView() {
               ["Places", diag.places], ["AI requests", diag.aiRequests], ["Text-only", diag.aiTextRequests], ["With image", diag.aiVisionRequests],
               ["With thinking", diag.aiThinkingRequests], ["AI failures", diag.aiFailures],
               ["Input tokens", diag.aiInputTokens.toLocaleString()], ["Output tokens", diag.aiOutputTokens.toLocaleString()],
-              ["Cache-hit tokens", diag.aiCacheHitTokens.toLocaleString()], ["Est. AI cost", `$${diag.aiEstimatedCost.toFixed(4)}`],
-              ["Cost / travel shot", diag.travelScreenshots ? `$${(diag.aiEstimatedCost / diag.travelScreenshots).toFixed(5)}` : "—"],
-              ["Cost / place", diag.places ? `$${(diag.aiEstimatedCost / diag.places).toFixed(5)}` : "—"],
+              ["Cache-hit tokens", diag.aiCacheHitTokens.toLocaleString()], ["Estimated AI cost", `$${diag.aiEstimatedCost.toFixed(4)}`],
+              ["Est. AI cost / travel screenshot", diag.travelScreenshots ? `$${(diag.aiEstimatedCost / diag.travelScreenshots).toFixed(5)}` : "—"],
+              ["Est. AI cost / place", diag.places ? `$${(diag.aiEstimatedCost / diag.places).toFixed(5)}` : "—"],
               ["Avg AI latency", `${(diag.aiAverageLatencyMs / 1000).toFixed(1)} s`],
             ].map(([label, value]) => (
               <div key={label as string} className="stat"><div className="stat-value">{value}</div><div className="stat-label">{label}</div></div>

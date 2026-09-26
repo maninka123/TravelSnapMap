@@ -72,10 +72,71 @@ pub struct AppConfig {
     /// Browser whose cookies yt-dlp may use for Reels that need a login (empty = none).
     pub cookies_from_browser: String,
 
-    // Cost estimate (USD per million tokens) — update from DeepSeek's pricing page.
-    pub price_input_cache_miss_per_million: f64,
-    pub price_input_cache_hit_per_million: f64,
-    pub price_output_per_million: f64,
+    /// Estimated AI cost settings. Only an estimate — DeepSeek bills from its own records; actual token
+    /// counts are always stored unchanged, and estimates are recalculated when this changes.
+    pub pricing: Pricing,
+}
+
+/// USD per million tokens for one time window.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rates {
+    pub input_cache_hit: f64,
+    pub input_cache_miss: f64,
+    pub output: f64,
+}
+
+/// DeepSeek bills peak and off-peak hours differently.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Pricing {
+    /// "timeOfDay" (by DeepSeek's peak schedule), "peak" (conservative) or "offPeak".
+    pub mode: String,
+    pub peak: Rates,
+    pub off_peak: Rates,
+    /// Peak windows in UTC, Monday–Friday, as [start hour, end hour) pairs.
+    pub peak_hours_utc: Vec<(u32, u32)>,
+    /// Where these numbers came from, shown in Settings.
+    pub source: String,
+}
+
+impl Default for Pricing {
+    /// Official deepseek-flash rates (api-docs.deepseek.com/quick_start/pricing, checked 2026-09-26).
+    fn default() -> Self {
+        Self {
+            mode: "timeOfDay".into(),
+            peak: Rates { input_cache_hit: 0.006, input_cache_miss: 0.30, output: 1.20 },
+            off_peak: Rates { input_cache_hit: 0.003, input_cache_miss: 0.15, output: 0.60 },
+            peak_hours_utc: vec![(1, 4), (6, 10)],
+            source: "deepseek-flash official pricing, checked 2026-09-26".into(),
+        }
+    }
+}
+
+impl Pricing {
+    /// Peak = Monday–Friday inside a peak window (UTC). Chinese public holidays are billed off-peak by
+    /// DeepSeek but aren't modelled, so estimates on those days err on the high side.
+    pub fn is_peak(&self, at: chrono::DateTime<chrono::Utc>) -> bool {
+        use chrono::{Datelike, Timelike};
+        match self.mode.as_str() {
+            "peak" => true,
+            "offPeak" => false,
+            _ => {
+                let weekday = at.weekday().number_from_monday() <= 5;
+                weekday && self.peak_hours_utc.iter().any(|(s, e)| at.hour() >= *s && at.hour() < *e)
+            }
+        }
+    }
+
+    pub fn rates_at(&self, at: chrono::DateTime<chrono::Utc>) -> Rates {
+        if self.is_peak(at) { self.peak } else { self.off_peak }
+    }
+
+    /// Estimated USD for one request made at `at`.
+    pub fn estimate(&self, cache_miss: u64, cache_hit: u64, output: u64, at: chrono::DateTime<chrono::Utc>) -> f64 {
+        let r = self.rates_at(at);
+        (cache_miss as f64 * r.input_cache_miss + cache_hit as f64 * r.input_cache_hit + output as f64 * r.output) / 1_000_000.0
+    }
 }
 
 impl Default for AppConfig {
@@ -113,14 +174,12 @@ impl Default for AppConfig {
             max_keyframes: 8,
             yt_dlp_path: String::new(),
             cookies_from_browser: String::new(),
-            price_input_cache_miss_per_million: 0.14,
-            price_input_cache_hit_per_million: 0.028,
-            price_output_per_million: 0.28,
+            pricing: Pricing::default(),
         }
     }
 }
 
-pub const CONFIG_VERSION: u32 = 2;
+pub const CONFIG_VERSION: u32 = 3;
 
 impl AppConfig {
     /// Moves settings saved by older builds to the current defaults where the old default was
@@ -132,15 +191,17 @@ impl AppConfig {
             if self.transcription_locale == "en-US" { self.transcription_locale = "auto".into(); }
             if (self.duplicate_image_distance - 0.35).abs() < 1e-9 { self.duplicate_image_distance = 0.08; }
         }
+        if self.config_version < 3 {
+            // The old single-rate prices were wrong (output was ~4x too low): use the official rates.
+            self.pricing = Pricing::default();
+        }
         self.config_version = CONFIG_VERSION;
         self
     }
 
+    /// Estimated USD for a request made now.
     pub fn estimated_cost(&self, cache_miss: u64, cache_hit: u64, output: u64) -> f64 {
-        (cache_miss as f64 * self.price_input_cache_miss_per_million
-            + cache_hit as f64 * self.price_input_cache_hit_per_million
-            + output as f64 * self.price_output_per_million)
-            / 1_000_000.0
+        self.pricing.estimate(cache_miss, cache_hit, output, chrono::Utc::now())
     }
 
     /// Requests go straight to DeepSeek (so a key is needed locally) rather than via a proxy.
@@ -177,5 +238,35 @@ mod tests {
         assert_eq!(new.model, "my-model");
         let custom: AppConfig = serde_json::from_str(r#"{"maxOutputTokens": 2500}"#).unwrap();
         assert_eq!(custom.upgraded().max_output_tokens, 2500);
+    }
+}
+
+#[cfg(test)]
+mod pricing_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn peak_and_off_peak_follow_the_official_schedule() {
+        let p = Pricing::default();
+        let wed_0230 = chrono::Utc.with_ymd_and_hms(2026, 9, 23, 2, 30, 0).unwrap();
+        let wed_0500 = chrono::Utc.with_ymd_and_hms(2026, 9, 23, 5, 0, 0).unwrap();
+        let wed_0959 = chrono::Utc.with_ymd_and_hms(2026, 9, 23, 9, 59, 0).unwrap();
+        let sat_0230 = chrono::Utc.with_ymd_and_hms(2026, 9, 26, 2, 30, 0).unwrap();
+        assert!(p.is_peak(wed_0230) && p.is_peak(wed_0959));
+        assert!(!p.is_peak(wed_0500) && !p.is_peak(sat_0230));
+        // 1M uncached input + 1M output: $1.50 at peak, $0.75 off-peak.
+        assert!((p.estimate(1_000_000, 0, 1_000_000, wed_0230) - 1.50).abs() < 1e-9);
+        assert!((p.estimate(1_000_000, 0, 1_000_000, sat_0230) - 0.75).abs() < 1e-9);
+        let always_peak = Pricing { mode: "peak".into(), ..Pricing::default() };
+        assert!(always_peak.is_peak(sat_0230));
+    }
+
+    #[test]
+    fn old_single_rate_prices_are_replaced() {
+        let old: AppConfig = serde_json::from_str(r#"{"configVersion": 2, "priceOutputPerMillion": 0.28}"#).unwrap();
+        let new = old.upgraded();
+        assert_eq!(new.pricing.peak.output, 1.20);
+        assert_eq!(new.config_version, CONFIG_VERSION);
     }
 }

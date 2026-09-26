@@ -135,3 +135,11 @@ export const LibraryService = {
     return [...reelItems, ...shotItems].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   },
 };
+
+export interface BackupSummary { path: string; sizeBytes: number; places: number; screenshots: number; reels: number; files: number }
+
+export const BackupService = {
+  /** Database, place photos/crops, Reel audio/frames and settings — never the API key. */
+  backup: (path: string) => invoke<BackupSummary>("backup_library", { path }),
+  exportPlaces: (path: string, format: "json" | "geojson") => invoke<number>("export_places", { path, format }),
+};

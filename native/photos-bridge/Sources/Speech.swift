@@ -8,6 +8,7 @@ enum SpeechService {
     static func bcp47(_ locale: Locale) -> String { locale.identifier(.bcp47) }
 
     /// Finds the modern-engine locale matching an identifier (exact, else same language).
+    @available(macOS 26.0, *)
     static func modernLocale(for identifier: String) async -> Locale? {
         let wanted = Locale(identifier: identifier)
         let supported = await SpeechTranscriber.supportedLocales
@@ -24,22 +25,26 @@ enum SpeechService {
             out[id] = ["id": id, "name": english.localizedString(forIdentifier: locale.identifier) ?? id,
                        "onDevice": SFSpeechRecognizer(locale: locale)?.supportsOnDeviceRecognition ?? false, "engine": "classic"]
         }
-        let installed = Set(await SpeechTranscriber.installedLocales.map(bcp47))
-        for locale in await SpeechTranscriber.supportedLocales {
-            let id = bcp47(locale)
-            out[id] = ["id": id, "name": english.localizedString(forIdentifier: id) ?? id, "onDevice": true,
-                       "engine": "SpeechTranscriber", "installed": installed.contains(id)]
+        if #available(macOS 26.0, *) {
+            let installed = Set(await SpeechTranscriber.installedLocales.map(bcp47))
+            for locale in await SpeechTranscriber.supportedLocales {
+                let id = bcp47(locale)
+                out[id] = ["id": id, "name": english.localizedString(forIdentifier: id) ?? id, "onDevice": true,
+                           "engine": "SpeechTranscriber", "installed": installed.contains(id)]
+            }
         }
         return out.values.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
     }
 
     static func transcribe(path: String, locale identifier: String) async throws -> [String: Any] {
-        if let locale = await modernLocale(for: identifier) {
+        // macOS 26+: on-device SpeechTranscriber (many languages, no permission prompt).
+        if #available(macOS 26.0, *), let locale = await modernLocale(for: identifier) {
             return try await transcribeOnDevice(path: path, locale: locale)
         }
         return try await transcribeClassic(path: path, locale: identifier)
     }
 
+    @available(macOS 26.0, *)
     private static func transcribeOnDevice(path: String, locale: Locale) async throws -> [String: Any] {
         let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [],
                                             attributeOptions: [.audioTimeRange, .transcriptionConfidence])

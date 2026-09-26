@@ -365,7 +365,7 @@ impl Pipeline {
         let after = self.db.reel(id).ok().flatten();
         stage("ai", "done", Some(format!("{} place(s) · {} text lines{}{}", extraction.all_places().len(), input.lines.len(),
             if input.image_jpeg.is_some() { " · 1 image" } else { "" },
-            after.map(|r| format!(" · ${:.5}", r.ai_cost)).unwrap_or_default())));
+            after.map(|r| format!(" · est. ${:.5}", r.ai_cost)).unwrap_or_default())));
 
         // An imported Reel was saved on purpose: travel unless the AI clearly disagrees.
         if !(extraction.is_travel_related || !extraction.all_places().is_empty()) {
@@ -560,7 +560,7 @@ impl Pipeline {
         self.time("ai.reel", t);
         match outcome {
             Ok(r) => {
-                self.db.log_ai_usage(None, "reel", &r.usage, true, AI_PROMPT_VERSION);
+                self.db.log_ai_usage(Some(&reel.id), "reel", &r.usage, true, AI_PROMPT_VERSION);
                 let cls = if r.value.is_travel_related { Classification::Travel } else { Classification::NotTravel };
                 let _ = self.db.set_reel_ai(&reel.id, cls, r.value.travel_confidence, &hash, &model, AI_PROMPT_VERSION,
                                             r.usage.input_tokens, r.usage.output_tokens, r.usage.estimated_cost);
@@ -572,7 +572,7 @@ impl Pipeline {
             }
             Err(e) => {
                 let usage = AiUsage { model, image_used: input.image_jpeg.is_some(), ..Default::default() };
-                self.db.log_ai_usage(None, "reel", &usage, false, AI_PROMPT_VERSION);
+                self.db.log_ai_usage(Some(&reel.id), "reel", &usage, false, AI_PROMPT_VERSION);
                 if e.is_transient() { Err(Stop::Waiting(e.to_string())) } else { Err(Stop::Failed(e.to_string())) }
             }
         }

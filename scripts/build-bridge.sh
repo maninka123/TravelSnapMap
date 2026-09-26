@@ -20,7 +20,7 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 xcrun swiftc -O -swift-version 5 \
-  -target "$ARCH-apple-macos26.0" \
+  -target "$ARCH-apple-macos15.0" \
   "$SRC"/Sources/*.swift \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$SRC/Info.plist" \
   -o "$OUT"

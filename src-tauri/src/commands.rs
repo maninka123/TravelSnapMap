@@ -396,7 +396,12 @@ fn rebuild_ai(state: &AppState, config: AppConfig) -> CmdResult<()> {
 
 #[tauri::command]
 pub async fn save_settings(state: State<'_, AppState>, config: AppConfig) -> CmdResult<()> {
+    let pricing_changed = state.pipeline.config().pricing != config.pricing;
     state.db.save_config(&config).map_err(err)?;
+    if pricing_changed {
+        // Estimates follow the pricing settings; token counts themselves never change.
+        state.db.recompute_estimated_costs(&config.pricing).map_err(err)?;
+    }
     rebuild_ai(&state, config)
 }
 
@@ -506,4 +511,29 @@ pub async fn retranscribe_reel(state: State<'_, AppState>, id: String, locale: S
 #[tauri::command]
 pub async fn speech_locales(state: State<'_, AppState>) -> CmdResult<Vec<crate::services::native::SpeechLocale>> {
     state.pipeline.media.speech_locales().await.map_err(err)
+}
+
+// MARK: Backup & export
+
+/// Writes a .zip backup (database, place photos/crops, Reel audio/frames, settings) — never the API key.
+#[tauri::command]
+pub async fn backup_library(state: State<'_, AppState>, path: String) -> CmdResult<crate::backup::BackupSummary> {
+    let (db, data_dir, config) = (state.db.clone(), state.pipeline.data_dir.clone(), state.pipeline.config());
+    tauri::async_runtime::spawn_blocking(move || crate::backup::create_backup(&db, &data_dir, &config, std::path::Path::new(&path)))
+        .await
+        .map_err(err)?
+        .map_err(err)
+}
+
+/// format: "json" (all places with facts and sources) or "geojson" (verified places).
+#[tauri::command]
+pub async fn export_places(state: State<'_, AppState>, path: String, format: String) -> CmdResult<usize> {
+    let value = match format.as_str() {
+        "geojson" => crate::backup::places_geojson(&state.db),
+        _ => crate::backup::places_json(&state.db),
+    }
+    .map_err(err)?;
+    let count = value["features"].as_array().or(value["places"].as_array()).map(|a| a.len()).unwrap_or(0);
+    crate::backup::write_json(&value, std::path::Path::new(&path)).map_err(err)?;
+    Ok(count)
 }
