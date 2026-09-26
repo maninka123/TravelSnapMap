@@ -162,6 +162,22 @@ pub fn run() {
                 }
             });
 
+            // Ignored screenshots/Reels never affect places or the map (also for items ignored by older versions).
+            {
+                let db = app.state::<AppState>().db.clone();
+                let ignored: Vec<(Option<String>, Option<String>)> = db.with(|c| {
+                    let mut stmt = c.prepare(
+                        "SELECT id, NULL FROM screenshots WHERE status = 'ignored' AND id IN (SELECT screenshot_id FROM place_screenshots) \
+                         UNION ALL SELECT NULL, id FROM reels WHERE status = 'ignored' AND id IN (SELECT reel_id FROM place_reels)",
+                    )?;
+                    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                    rows.collect()
+                }).unwrap_or_default();
+                for (shot, reel) in ignored {
+                    let _ = db.detach_source(shot.as_deref(), reel.as_deref());
+                }
+            }
+
             // Work parked while offline (or at the daily AI limit) resumes periodically.
             let retry_queue = queue.clone();
             let retry_state = app.state::<AppState>().db.clone();

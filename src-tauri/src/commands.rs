@@ -484,8 +484,8 @@ pub async fn reel_action(state: State<'_, AppState>, id: String, action: String)
     match action.as_str() {
         "reprocess" => spawn_reel(&state, id, true),
         "ignore" => {
-            // Like screenshots: its automatic places/tips go, your own edits stay, and it's never processed again.
-            state.db.clear_reel_derived(&id).map_err(err)?;
+            // Like screenshots: it stays under "Ignored" but no longer affects places, the map or Review.
+            state.db.detach_source(None, Some(&id)).map_err(err)?;
             state.db.finish_reel(&id, ProcessingStatus::Ignored, Some("ignored by you")).map_err(err)?;
         }
         "delete" => {

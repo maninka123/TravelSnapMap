@@ -110,3 +110,81 @@ impl Database {
         })
     }
 }
+
+impl Database {
+    /// Ignoring a screenshot or Reel: it stays in "Ignored" but no longer affects anything — its place links,
+    /// tips (yours too), photos and review items go. Places that only existed because of it are removed,
+    /// unless you've put something into them (notes, a visit, your photos, a trip, a status).
+    pub fn detach_source(&self, screenshot_id: Option<&str>, reel_id: Option<&str>) -> Result<usize> {
+        self.transaction(|tx| {
+            let (link_table, column, id) = match (screenshot_id, reel_id) {
+                (Some(s), _) => ("place_screenshots", "screenshot_id", s),
+                (None, Some(r)) => ("place_reels", "reel_id", r),
+                _ => return Ok(0),
+            };
+            let places: Vec<String> = {
+                let mut stmt = tx.prepare(&format!("SELECT place_id FROM {link_table} WHERE {column} = ?1"))?;
+                let rows = stmt.query_map([id], |r| r.get(0))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            tx.execute(&format!("DELETE FROM {link_table} WHERE {column} = ?1"), [id])?;
+            tx.execute(&format!("DELETE FROM travel_facts WHERE {column} = ?1"), [id])?;
+            tx.execute(&format!("DELETE FROM place_images WHERE {column} = ?1"), [id])?;
+            tx.execute(&format!("DELETE FROM review_items WHERE {column} = ?1"), [id])?;
+            let mut removed = 0;
+            for place in places {
+                removed += tx.execute(
+                    "DELETE FROM places WHERE id = ?1 \
+                     AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.place_id = places.id) \
+                     AND NOT EXISTS (SELECT 1 FROM place_reels pr WHERE pr.place_id = places.id) \
+                     AND NOT EXISTS (SELECT 1 FROM trip_places t WHERE t.place_id = places.id) \
+                     AND NOT EXISTS (SELECT 1 FROM place_memories m WHERE m.place_id = places.id) \
+                     AND notes = '' AND visit_notes = '' AND visited_at IS NULL AND personal_status = 'wantToVisit'",
+                    [&place],
+                )?;
+            }
+            // Duplicate-place questions that involved a removed place are moot.
+            tx.execute(
+                "DELETE FROM review_items WHERE (place_a_id IS NOT NULL AND place_a_id NOT IN (SELECT id FROM places)) \
+                 OR (place_b_id IS NOT NULL AND place_b_id NOT IN (SELECT id FROM places))",
+                [],
+            )?;
+            Ok(removed)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{DataOrigin, PlaceCandidate, PlaceCategory, Verification};
+
+    fn candidate(name: &str, lat: f64) -> PlaceCandidate {
+        serde_json::from_value(serde_json::json!({"name": name, "latitude": lat, "longitude": 80.0})).unwrap()
+    }
+
+    #[test]
+    fn ignoring_a_source_removes_its_effect_but_keeps_places_you_care_about() {
+        let dir = std::env::temp_dir().join(format!("tsm-ignore-{}", uuid::Uuid::new_v4()));
+        let db = Database::open(&dir.join("t.sqlite")).unwrap();
+        db.with(|c| c.execute_batch(
+            "INSERT INTO screenshots(id, photos_id, discovered_at) VALUES ('s1','p1','2026-01-01'), ('s2','p2','2026-01-01');",
+        )).unwrap();
+        let only = db.insert_place(&candidate("Only from s1", 7.0), PlaceCategory::Beach, Verification::UserVerified, DataOrigin::User, &[]).unwrap();
+        let shared = db.insert_place(&candidate("Also in s2", 7.5), PlaceCategory::Beach, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        let noted = db.insert_place(&candidate("Has my notes", 8.0), PlaceCategory::Beach, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        for p in [&only, &shared, &noted] {
+            db.link(&p.id, "s1", &p.canonical_name, 1.0, DataOrigin::User).unwrap();
+        }
+        db.link(&shared.id, "s2", "x", 0.9, DataOrigin::Ai).unwrap();
+        db.update_place_field(&noted.id, "notes", Some("go early")).unwrap();
+
+        let removed = db.detach_source(Some("s1"), None).unwrap();
+        assert_eq!(removed, 1);
+        assert!(db.place(&only.id).unwrap().is_none(), "a place that only came from the ignored screenshot is gone");
+        assert!(db.place(&shared.id).unwrap().is_some(), "still backed by another screenshot");
+        assert!(db.place(&noted.id).unwrap().is_some(), "you wrote notes on it");
+        assert!(db.places_for_screenshot("s1").unwrap().is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

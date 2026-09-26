@@ -29,7 +29,8 @@ impl Pipeline {
     }
 
     pub fn ignore(&self, screenshot_id: &str) -> Result<()> {
-        self.db.clear_derived(screenshot_id, true)?;
+        // It stays under "Ignored" but no longer affects places, the map, trips or Review.
+        self.db.detach_source(Some(screenshot_id), None)?;
         self.db.finish_screenshot(screenshot_id, ProcessingStatus::Ignored, Some("ignored by you"))?;
         Ok(())
     }

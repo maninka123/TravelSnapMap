@@ -229,7 +229,7 @@ impl Database {
             let sum = |sql: &str| -> rusqlite::Result<f64> { c.query_row(sql, [], |r| r.get::<_, Option<f64>>(0)).map(|v| v.unwrap_or(0.0)) };
             Ok(Diagnostics {
                 total_screenshots: count("SELECT COUNT(*) FROM screenshots")?,
-                travel_screenshots: count("SELECT COUNT(*) FROM screenshots WHERE classification = 'travel' OR user_classification = 'travel'")?,
+                travel_screenshots: count("SELECT COUNT(*) FROM screenshots WHERE (classification = 'travel' OR user_classification = 'travel') AND status != 'ignored'")?,
                 not_travel: count("SELECT COUNT(*) FROM screenshots WHERE status = 'notTravel'")?,
                 skipped_locally: count("SELECT COUNT(*) FROM screenshots WHERE escalation_level = 1")?,
                 needs_review: count("SELECT COUNT(*) FROM screenshots WHERE status = 'needsReview'")?,
