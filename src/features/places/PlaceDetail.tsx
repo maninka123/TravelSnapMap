@@ -8,6 +8,7 @@ import { useAction, useLoad, useNav } from "../../lib/nav";
 import { quietBasemap } from "../map/MapView";
 import { resolveMapStyle } from "../../lib/mapStyle";
 import { MyVisit } from "./MyVisit";
+import { openUrl } from "../../lib/open";
 
 export function PlaceDetail({ id }: { id: string }) {
   const nav = useNav();
@@ -39,6 +40,8 @@ export function PlaceDetail({ id }: { id: string }) {
           {place.isUserVerified && <Pill tone="ok">Verified by you</Pill>}
           <span className="spacer" />
           <button className="btn" onClick={() => setDialog("trip")}>✈️ Add to trip</button>
+          <button className="btn" title="Open in Apple Maps"
+                  onClick={() => openUrl(`https://maps.apple.com/?ll=${place.latitude},${place.longitude}&q=${encodeURIComponent(place.canonicalName)}`)}>🧭 Apple Maps</button>
           <details className="menu">
             <summary className="btn">More ▾</summary>
             <div className="menu-items card">
@@ -69,7 +72,7 @@ export function PlaceDetail({ id }: { id: string }) {
 
       {data.images.length > 0 && (
         <>
-          <div className="section"><h3>Photos</h3><span className="muted small">{data.images.filter((i) => i.isAccepted).length}</span></div>
+          <div className="section"><h3>Photos from your sources</h3><span className="muted small">{data.images.filter((i) => i.isAccepted).length}</span></div>
           <div className="grid small-tiles">
             {data.images.filter((i) => i.isAccepted).map((img) => (
               <div key={img.id} className="tile">
@@ -118,7 +121,7 @@ export function PlaceDetail({ id }: { id: string }) {
         </>
       )}
 
-      <div className="section"><h3>Notes</h3></div>
+      <div className="section"><h3>Your notes</h3></div>
       <Notes place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "notes", v))} />
 
       {dialog === "location" && (

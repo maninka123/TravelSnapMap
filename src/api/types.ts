@@ -258,6 +258,7 @@ export interface Overview {
   screenshotCounts: Record<string, number>;
   openReviews: number;
   places: number;
+  unconfirmedPlaces: number;
   queue: QueueSnapshot;
   model: string;
   aiConfigured: boolean;

@@ -26,6 +26,17 @@ export function PlacesView() {
     return [...s].sort();
   }, [all, filter.countryCode]);
 
+  // Only offer categories/statuses you actually have (within the chosen country/city), with counts.
+  const available = useMemo(() => {
+    const inArea = all.filter((p) => (!filter.countryCode || p.countryCode === filter.countryCode) && (!filter.city || p.city === filter.city));
+    const tally = (key: (p: (typeof all)[number]) => string) => {
+      const m = new Map<string, number>();
+      inArea.forEach((p) => m.set(key(p), (m.get(key(p)) ?? 0) + 1));
+      return m;
+    };
+    return { categories: tally((p) => p.category), statuses: tally((p) => p.personalStatus) };
+  }, [all, filter.countryCode, filter.city]);
+
   const set = (patch: Partial<PlaceFilter>) => setFilter((f) => ({ ...f, ...patch }));
 
   // Group by country for the list layout.
@@ -52,7 +63,7 @@ export function PlacesView() {
       <div className="toolbar">
         <input className="grow" style={{ maxWidth: 360 }} placeholder="Search names, cities, tips, creators, apps…"
                value={filter.search ?? ""} onChange={(e) => set({ search: e.target.value || undefined })} />
-        <select value={filter.countryCode ?? ""} onChange={(e) => set({ countryCode: e.target.value || undefined, city: undefined })}>
+        <select value={filter.countryCode ?? ""} onChange={(e) => set({ countryCode: e.target.value || undefined, city: undefined, category: undefined, status: undefined })}>
           <option value="">All countries</option>
           {countries.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select>
@@ -62,11 +73,11 @@ export function PlacesView() {
         </select>
         <select value={filter.category ?? ""} onChange={(e) => set({ category: e.target.value || undefined })}>
           <option value="">All categories</option>
-          {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label}</option>)}
+          {Object.entries(CATEGORY).filter(([k]) => available.categories.has(k)).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label} ({available.categories.get(k)})</option>)}
         </select>
         <select value={filter.status ?? ""} onChange={(e) => set({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
-          {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
+          {Object.entries(STATUS).filter(([k]) => available.statuses.has(k)).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label} ({available.statuses.get(k)})</option>)}
         </select>
         <select value={filter.sort ?? "recent"} onChange={(e) => set({ sort: e.target.value as PlaceFilter["sort"] })}>
           <option value="recent">Recently added</option>

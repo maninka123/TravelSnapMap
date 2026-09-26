@@ -74,7 +74,8 @@ type Mode = "near" | "dates";
 /** Choose your own photos: those taken near the place (by GPS) or on the days you were there. */
 function MemoryPicker({ place, onClose }: { place: Place; onClose: () => void }) {
   const [mode, setMode] = useState<Mode>("near");
-  const [radius, setRadius] = useState(1);
+  // A whole city/region needs a wider circle than a single spot.
+  const [radius, setRadius] = useState(place.category === "city" || place.category === "region" ? 25 : place.category === "nature" || place.category === "hiking" ? 5 : 1);
   const today = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(place.visitedAt ?? today);
   const [to, setTo] = useState(place.visitedAt ?? today);

@@ -8,7 +8,7 @@ import { Flag, Thumb } from "../../components/common";
 import { CATEGORY, STATUS } from "../../lib/labels";
 import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
-import { useLoad, useNav } from "../../lib/nav";
+import { useAction, useLoad, useNav } from "../../lib/nav";
 import { getMapStyleId, MAP_STYLES, resolveMapStyle, setMapStyleId, type MapStyleId } from "../../lib/mapStyle";
 
 /** Base-map labels that compete with your places: road names/shields, POIs, water lines, villages. */
@@ -54,9 +54,15 @@ export function MapView() {
 
   // Drop filter choices that don't exist in the new country/city, so a hidden filter never empties the map.
   useEffect(() => {
-    setCategories((c) => c.filter((x) => scoped.some((p) => p.category === x)));
-    setStatuses((st) => st.filter((x) => scoped.some((p) => p.personalStatus === x)));
+    const keep = <T,>(list: T[], has: (v: T) => boolean) => (list.every(has) ? list : list.filter(has)); // same array when unchanged: no re-render
+    setCategories((c) => keep(c, (x) => scoped.some((p) => p.category === x)));
+    setStatuses((st) => keep(st, (x) => scoped.some((p) => p.personalStatus === x)));
   }, [scoped]);
+
+  // Keep the open card in sync after edits (e.g. a status change) and close it if the place is gone.
+  useEffect(() => {
+    setSelected((s) => (s ? places.find((p) => p.id === s.id) : s));
+  }, [places]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -479,7 +485,7 @@ function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll, onCount
 /** The card shown when you tap a pin: photo with the name over it, where, what kind, and your status. */
 function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => void; onOpen: () => void }) {
   const cat = CATEGORY[place.category] ?? CATEGORY.other;
-  const status = STATUS[place.personalStatus];
+  const action = useAction();
   const hero = place.heroImagePath ?? place.thumbnailPath;
   return (
     <div className="map-preview" key={place.id}>
@@ -499,7 +505,10 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
         </div>
         {place.summaryText && <p className="map-preview-summary">{place.summaryText}</p>}
         <div className="map-preview-meta">
-          <span className={`status-pill status-${place.personalStatus}`}>{status.emoji} {status.label}</span>
+          <select className={`status-pill status-${place.personalStatus}`} value={place.personalStatus} title="Change status"
+                  disabled={action.busy} onChange={(e) => action.run(() => PlaceService.update(place.id, "personalStatus", e.target.value))}>
+            {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
+          </select>
           <span className="meta-pill">🗂 {place.sourceCount} source{place.sourceCount === 1 ? "" : "s"}</span>
           {place.memoryCount > 0 && <span className="meta-pill">📷 {place.memoryCount}</span>}
         </div>
@@ -654,8 +663,8 @@ function Onboarding() {
         <span className="step-num">3</span>
         <div className="grow">
           <div className="strong">Scan screenshots</div>
-          <div className="muted small">Only screenshots you haven't processed yet. Runs in the background; pause any time. Tip: try a small test run from Sources first.</div>
-          <div className="row wrap" style={{ marginTop: 8 }}>{!scanning && <ScanControls compact />}{scanning && <span className="muted">Scanning…</span>}</div>
+          <div className="muted small">Only screenshots you haven't processed yet. Runs in the background; pause any time. Tip: try a small test run first (Settings → Diagnostics).</div>
+          <div className="row wrap" style={{ marginTop: 8 }}>{!scanning && <ScanControls />}{scanning && <span className="muted">Scanning…</span>}</div>
         </div>
       </div>
     </div>

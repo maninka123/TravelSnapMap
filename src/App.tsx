@@ -31,6 +31,21 @@ function Shell() {
     return () => { unlisten.forEach((p) => void p.then((u) => u())); };
   }, [nav.refresh]);
 
+  // Mac shortcuts: ⌘1–6 switch sections; ⌘F jumps to the search field of the current page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.altKey || e.ctrlKey) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= NAV.length) { e.preventDefault(); nav.go(NAV[n - 1].view); return; }
+      if (e.key.toLowerCase() === "f") {
+        const field = document.querySelector<HTMLInputElement>(".content input[placeholder^='Search']");
+        if (field) { e.preventDefault(); field.focus(); field.select(); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nav]);
+
   const top = nav.panels[nav.panels.length - 1];
   // Symmetric motion: the sheet leaves the way it came in (to the right) before it unmounts.
   const [closing, setClosing] = useState(false);
@@ -50,7 +65,8 @@ function Shell() {
         </div>
         <nav>
           {NAV.map((n) => (
-            <button key={n.view} className={`nav-item ${nav.view === n.view ? "active" : ""}`} onClick={() => nav.go(n.view)}>
+            <button key={n.view} className={`nav-item ${nav.view === n.view ? "active" : ""}`} onClick={() => nav.go(n.view)}
+                    title={`${n.label} (⌘${NAV.indexOf(n) + 1})`}>
               <span className="nav-icon">{n.icon}</span>
               <span>{n.label}</span>
               {n.view === "review" && !!overview?.openReviews && <span className="badge">{overview.openReviews}</span>}
@@ -58,7 +74,14 @@ function Shell() {
           ))}
         </nav>
         <div className="sidebar-foot muted small">
-          {overview && <>{overview.places} places</>}
+          {overview && (
+            <>
+              {(overview.places - overview.unconfirmedPlaces).toLocaleString()} places on the map
+              {overview.unconfirmedPlaces > 0 && (
+                <button className="link-btn" onClick={() => nav.go("review")}>{overview.unconfirmedPlaces} to confirm</button>
+              )}
+            </>
+          )}
         </div>
       </aside>
 

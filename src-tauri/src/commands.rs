@@ -31,7 +31,9 @@ pub async fn get_overview(state: State<'_, AppState>) -> CmdResult<Value> {
     Ok(json!({
         "screenshotCounts": counts,
         "openReviews": state.db.open_review_count().map_err(err)?,
-        "places": state.db.list_places(&PlaceFilter::default()).map_err(err)?.len(),
+        "places": state.db.with(|c| c.query_row("SELECT COUNT(*) FROM places", [], |r| r.get::<_, i64>(0))).map_err(err)?,
+        // Unconfirmed places wait in Review and aren't on the map yet.
+        "unconfirmedPlaces": state.db.with(|c| c.query_row("SELECT COUNT(*) FROM places WHERE verification = 'needsReview'", [], |r| r.get::<_, i64>(0))).map_err(err)?,
         "queue": state.queue.snapshot(),
         "model": config.model,
         "aiConfigured": key.is_some() || !config.is_direct_deepseek(),

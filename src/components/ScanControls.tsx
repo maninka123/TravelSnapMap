@@ -7,7 +7,7 @@ import { useAction, useLoad, useNav } from "../lib/nav";
 import { ErrorNote, Modal, Pill, Thumb } from "./common";
 
 /** Main screenshot actions: Scan New Screenshots and Import Folder… (test runs live in Settings → Diagnostics). */
-export function ScanControls(_: { compact?: boolean } = {}) {
+export function ScanControls() {
   const { data: preview, reload } = useLoad(() => ProcessingService.scanPreview(), []);
   const action = useAction();
   const newCount = (preview?.photos.new ?? 0) + (preview?.folders ?? []).reduce((n, f) => n + (f.summary.new ?? 0), 0);

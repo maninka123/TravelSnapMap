@@ -102,3 +102,6 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Map redesign: quiet basemap (Positron/Dark, minor labels hidden), Filters popover, “In view” panel grouped by country → city, sized clusters with ring + hover, category pins with selected state, Fit-all control; country chip row removed
 - [x] Map style picker (Light · Bright · Colourful · Dark · Blue · Match system), remembered; Light by default
 - [x] Apple-design pass on the newer UI: Reduce Motion/Transparency for all popovers, instant press feedback on rows, no fake press on non-buttons
+- [x] Consistency pass: map/sidebar counts explained, Places filters show only what exists, clearer photo sections, wider photo search for cities, map card keeps in sync
+- [x] Small extras: change status from the map card, Open in Apple Maps on place pages, ⌘1–6 / ⌘F shortcuts
+- [x] README rewritten (short, professional)
