@@ -105,6 +105,10 @@ export const ReelService = {
   detail: (id: string) => invoke<ReelDetail>("get_reel_detail", { id }),
   /** Paste an Instagram Reel/Post URL. Processing continues in the background. */
   importUrl: (url: string) => invoke<string>("import_reel", { url }),
+  /** Every Instagram link in pasted text — processed one after another in the background. */
+  importMany: (text: string) => invoke<BulkReelImport>("import_reels", { text }),
+  /** Every Instagram link inside a text file (.txt, .md, .csv…). */
+  importFile: (path: string) => invoke<BulkReelImport>("import_reels_from_file", { path }),
   /** Fallback when Instagram media isn't accessible: use a video saved in Photos. */
   listPhotoVideos: () => invoke<PhotoVideo[]>("list_photo_videos"),
   attachPhotoVideo: (reelId: string | null, assetId: string) => invoke<string>("import_reel_video_from_photos", { reelId, assetId }),
@@ -143,3 +147,5 @@ export const BackupService = {
   backup: (path: string) => invoke<BackupSummary>("backup_library", { path }),
   exportPlaces: (path: string, format: "json" | "geojson") => invoke<number>("export_places", { path, format }),
 };
+
+export interface BulkReelImport { found: number; added: number; alreadyImported: number; ids: string[] }

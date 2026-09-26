@@ -230,7 +230,22 @@ impl Pipeline {
         self.db.set_status(&shot.id, ProcessingStatus::Loading, None).map_err(fail)?;
         if !have_image {
             let t = Instant::now();
-            self.export_source(&shot.photos_id, &image_path).await.map_err(fail)?;
+            // iCloud downloads fail transiently under load (real scan: 1,407 "offline" errors that all worked
+            // moments later): retry with backoff, then park the screenshot for automatic retry.
+            let mut attempt = 0u64;
+            loop {
+                match self.export_source(&shot.photos_id, &image_path).await {
+                    Ok(()) => break,
+                    Err(e) if is_transient_photos_error(&e.to_string()) => {
+                        attempt += 1;
+                        if attempt >= 3 {
+                            return Err(Stop::Waiting(format!("iCloud Photos download will be retried: {e}")));
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(3 * attempt * attempt)).await;
+                    }
+                    Err(e) => return Err(fail(e)),
+                }
+            }
             self.time("photos.export", t);
         }
         let thumb = self.path("thumbnails", &format!("{}.jpg", shot.id));
@@ -546,3 +561,18 @@ pub fn compress_for_ai(img: &image::RgbImage, max_pixel: u32) -> Option<Vec<u8>>
     Some(out)
 }
 
+
+/// Photos/iCloud errors that go away on their own (network, iCloud download throttling).
+pub fn is_transient_photos_error(message: &str) -> bool {
+    let m = message.to_lowercase();
+    ["offline", "network", "internet", "timed out", "icloud", "cloudphotolibrary", "try again"].iter().any(|k| m.contains(k))
+}
+
+#[cfg(test)]
+mod transient_tests {
+    #[test]
+    fn real_icloud_errors_are_transient() {
+        assert!(super::is_transient_photos_error("The internet connection appears to be offline."));
+        assert!(!super::is_transient_photos_error("Screenshot no longer exists in Photos"));
+    }
+}

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "sh scripts/tauri.sh",
     "typecheck": "tsc -b --noEmit",
     "test": "cd src-tauri && cargo test",
     "build:bridge": "sh scripts/build-bridge.sh"

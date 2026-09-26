@@ -537,3 +537,60 @@ pub async fn export_places(state: State<'_, AppState>, path: String, format: Str
     crate::backup::write_json(&value, std::path::Path::new(&path)).map_err(err)?;
     Ok(count)
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkReelImport {
+    /// Instagram links found in the text.
+    found: usize,
+    /// New Reels added and queued.
+    added: usize,
+    /// Links that were already in the library.
+    already_imported: usize,
+    ids: Vec<String>,
+}
+
+/// One worker processes bulk imports sequentially (kind to Instagram's rate limits).
+static REEL_WORKER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn import_many(state: &AppState, text: &str) -> CmdResult<BulkReelImport> {
+    let urls = crate::services::reels::extract_instagram_urls(text);
+    let (mut ids, mut added, mut already) = (Vec::new(), 0, 0);
+    for url in &urls {
+        let (id, created) = state.pipeline.register_reel(url).map_err(err)?;
+        if created { added += 1 } else { already += 1 }
+        let pending = state.db.reel(&id).map_err(err)?.is_some_and(|r| r.status.needs_processing());
+        if created || pending {
+            ids.push(id);
+        }
+    }
+    let pipeline = state.pipeline.clone();
+    let queue = ids.clone();
+    tauri::async_runtime::spawn(async move {
+        let _guard = REEL_WORKER.lock().await;
+        for (i, id) in queue.iter().enumerate() {
+            if i > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+            pipeline.process_reel(id).await;
+        }
+    });
+    Ok(BulkReelImport { found: urls.len(), added, already_imported: already, ids })
+}
+
+/// Many links at once (pasted list, one per line or mixed with other text).
+#[tauri::command]
+pub async fn import_reels(state: State<'_, AppState>, text: String) -> CmdResult<BulkReelImport> {
+    import_many(&state, &text)
+}
+
+/// All Instagram links inside a text file (.txt, .md, .csv, notes export…).
+#[tauri::command]
+pub async fn import_reels_from_file(state: State<'_, AppState>, path: String) -> CmdResult<BulkReelImport> {
+    let meta = std::fs::metadata(&path).map_err(err)?;
+    if meta.len() > 10_000_000 {
+        return Err("That file is too large (over 10 MB) — is it really a list of links?".into());
+    }
+    let bytes = std::fs::read(&path).map_err(err)?;
+    import_many(&state, &String::from_utf8_lossy(&bytes))
+}

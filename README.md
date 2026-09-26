@@ -81,7 +81,7 @@ For production, set **Settings → API base URL** to your own backend proxy so t
 - **📁 Import Folder…** — screenshots from any device (PNG, JPG, HEIC…). Same pipeline, same "only new" logic.
 - **Automatically process new screenshots** (Settings, **off by default**) — when on, new screenshots are processed as
   soon as Photos reports them.
-- **🎬 Import Reel** — paste an Instagram Reel/Post link. The Reel page shows each stage (Caption → Video → Audio →
+- **🎬 Import Reels** — paste one link, a whole list (any text with links in it), or choose a text file (.txt, .md, .csv…) containing links. Duplicates are skipped; several Reels are processed one after another. The Reel page shows each stage (Caption → Video → Audio →
   Transcript → Keyframes → OCR → AI extraction → Places resolved) with timings; a failed stage never stops the others.
   **Auto language** picks the spoken language from the caption / on-screen text; you can re-transcribe in English,
   Japanese, Chinese, Korean, Tamil and every other language Apple supports on your Mac (Sinhala isn't supported by

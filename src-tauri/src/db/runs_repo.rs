@@ -267,3 +267,18 @@ impl Database {
         })
     }
 }
+
+impl Database {
+    /// Screenshots that failed only for reasons that are now fixed (missing API key, iCloud/network
+    /// hiccups) go back into the queue. Status change only — nothing is deleted or re-done needlessly.
+    pub fn requeue_transient_failures(&self, include_missing_key: bool) -> Result<usize> {
+        let key_clause = if include_missing_key { " OR status_detail LIKE '%No DeepSeek API key%'" } else { "" };
+        let n = self.with(|c| c.execute(
+            &format!("UPDATE screenshots SET status = 'waitingForNetwork' WHERE status = 'failed' AND (\
+                      lower(status_detail) LIKE '%offline%' OR lower(status_detail) LIKE '%network%' \
+                      OR lower(status_detail) LIKE '%internet%'{key_clause})"),
+            [],
+        ))?;
+        Ok(n)
+    }
+}

@@ -84,3 +84,7 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Pre-migration backups + transactional migrations with a clear error on failure
 - [x] Minimum macOS lowered to 15 with fallbacks for the two macOS-26-only APIs
 - [x] Docs updated (pricing, benchmarks, test count)
+- [x] Double-clicked app uses the project's .env.local key; failed-for-temporary-reasons screenshots re-queued (no data deleted)
+- [x] iCloud Photos download errors retried with backoff, then parked for automatic retry
+- [x] Bulk Reel import: paste many links or choose a text file; processed one after another
+- [x] `npm run tauri …` works even when Terminal doesn't have Rust on its PATH

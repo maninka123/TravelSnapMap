@@ -43,7 +43,7 @@ export function SourcesView() {
           ))}
         </div>
         <ScanControls />
-        <button className="btn" onClick={() => setImporting(true)}>🎬 Import Reel</button>
+        <button className="btn" onClick={() => setImporting(true)}>🎬 Import Reels</button>
       </div>
 
       <div className="toolbar">

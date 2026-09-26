@@ -38,6 +38,10 @@ fn load_env() {
     for name in ["../.env.local", ".env.local", "../.env", ".env"] {
         let _ = dotenvy::from_filename(name);
     }
+    // The double-clicked .app starts in "/", so also read the project's own .env.local by absolute path.
+    // It is read at runtime (never compiled into the app) and simply doesn't exist on other machines.
+    let project_env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.env.local");
+    let _ = dotenvy::from_path(project_env);
 }
 
 /// A native alert for errors that happen before the window exists (e.g. a failed library upgrade).
@@ -102,7 +106,13 @@ pub fn run() {
                     db.set_setting("deepseekApiKey", None)?;
                 }
             }
-            let (api_key, _) = config::resolve_api_key();
+            let (api_key, key_source) = config::resolve_api_key();
+            log::info!("DeepSeek key: {}", if api_key.is_some() { key_source } else { "not configured" });
+            match db.requeue_transient_failures(api_key.is_some()) {
+                Ok(n) if n > 0 => log::info!("re-queued {n} screenshots that failed for temporary reasons"),
+                Err(e) => log::warn!("could not re-queue failed screenshots: {e}"),
+                _ => {}
+            }
 
             let bridge = Arc::new(NativeBridge::new(NativeBridge::locate_binary()));
             let places = Arc::new(PlaceService::new(bridge.clone()));
@@ -229,6 +239,8 @@ pub fn run() {
             commands::retranscribe_reel,
             commands::speech_locales,
             commands::backup_library,
+            commands::import_reels,
+            commands::import_reels_from_file,
             commands::export_places,
         ])
         .run(tauri::generate_context!())

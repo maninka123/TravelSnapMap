@@ -45,6 +45,24 @@ pub fn shortcode(url: &str) -> Option<String> {
     parts.next().filter(|c| c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')).map(String::from)
 }
 
+/// Every Instagram Reel/Post link in free text (a pasted list, a .txt/.md/.csv file, notes…),
+/// normalised to https://www.instagram.com/… and de-duplicated by shortcode, in order of appearance.
+pub fn extract_instagram_urls(text: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for raw in text.split(|c: char| c.is_whitespace() || "\"'<>()[]{},;|".contains(c)) {
+        let Some(pos) = raw.to_lowercase().find("instagram.com/") else { continue };
+        let tail = raw[pos..].trim_end_matches(['.', '!', '?', ':']);
+        let url = format!("https://www.{tail}");
+        if let Some(code) = shortcode(&url) {
+            if seen.insert(code) {
+                out.push(url);
+            }
+        }
+    }
+    out
+}
+
 pub fn is_instagram_url(url: &str) -> bool {
     let u = url.trim().to_lowercase();
     (u.starts_with("https://") || u.starts_with("http://")) && u.contains("instagram.com/") && shortcode(url).is_some()
@@ -309,5 +327,21 @@ mod tests {
     #[test]
     fn entities() {
         assert_eq!(unescape("Tom &amp; Jerry &#x27;s &#39;x&#39; &unknown; & done"), "Tom & Jerry 's 'x' &unknown; & done");
+    }
+}
+
+#[cfg(test)]
+mod bulk_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_all_links_from_messy_text() {
+        let text = "My saves:\n1. https://www.instagram.com/reel/AAA111/?igsh=xyz\n- instagram.com/p/BBB222, and (https://instagram.com/reel/CCC333/).\n\
+                    dup: https://www.instagram.com/reel/AAA111/ \n not a reel https://www.instagram.com/someone/ \n\"http://instagram.com/tv/DDD444\"";
+        let urls = extract_instagram_urls(text);
+        assert_eq!(urls.len(), 4, "{urls:?}");
+        assert_eq!(shortcode(&urls[0]).as_deref(), Some("AAA111"));
+        assert!(urls.iter().all(|u| u.starts_with("https://www.instagram.com/") && is_instagram_url(u)));
+        assert_eq!(shortcode(&urls[3]).as_deref(), Some("DDD444"));
     }
 }
