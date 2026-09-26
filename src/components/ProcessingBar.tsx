@@ -10,6 +10,7 @@ export function ProcessingBar() {
   const { refresh } = useNav();
   const [snap, setSnap] = useState<QueueSnapshot>();
   const lastRefresh = useRef(0);
+  const [dismissed, setDismissed] = useState(false);
   // Whole-library progress (refreshed every ~2 s while processing), so the bar continues from where you are.
   const { data: overview } = useLoad(() => AppService.overview(), []);
 
@@ -27,10 +28,29 @@ export function ProcessingBar() {
     return () => { void unlisten.then((u) => u()); };
   }, [refresh]);
 
-  if (!snap || (!snap.running && snap.total === 0 && !snap.lastError)) return null;
   const counts = overview?.screenshotCounts ?? {};
   const libraryTotal = Object.values(counts).reduce((a, b) => a + b, 0);
   const libraryDone = DONE.reduce((n, k) => n + (counts[k] ?? 0), 0);
+  const unfinished = libraryTotal - libraryDone - (counts.failed ?? 0);
+
+  // Nothing running (e.g. the app was quit mid-scan): offer to continue instead of hiding the progress.
+  if (snap && !snap.running && !snap.lastError && unfinished > 0 && !dismissed) {
+    const donePct = libraryTotal ? Math.round((libraryDone / libraryTotal) * 100) : 0;
+    return (
+      <div className="processing-bar">
+        <div className="pb-main">
+          <div className="pb-title">{unfinished.toLocaleString()} screenshots not finished yet</div>
+          <div className="pb-stats"><span className="strong">{libraryDone.toLocaleString()} of {libraryTotal.toLocaleString()} done · {donePct}%</span></div>
+          <div className="progress"><div style={{ width: `${donePct}%` }} /></div>
+        </div>
+        <div className="pb-actions">
+          <button className="btn primary" onClick={() => ProcessingService.start({ kind: "scanNew" })}>Continue</button>
+          <button className="btn" onClick={() => setDismissed(true)}>Later</button>
+        </div>
+      </div>
+    );
+  }
+  if (!snap || (!snap.running && snap.total === 0 && !snap.lastError)) return null;
   const pct = libraryTotal ? Math.round((libraryDone / libraryTotal) * 100) : snap.total ? Math.round((snap.processed / snap.total) * 100) : 0;
 
   return (
