@@ -30,6 +30,8 @@ The **Place** is the central object. Screenshots and Reels are evidence attached
 
 ## Quick start
 
+**Easiest:** double-click **`Open TravelSnapMap.command`** in the project folder. It builds the app the first time (or whenever the code changed) and opens it.
+
 Requirements (macOS 15 Sequoia or later; macOS 26+ recommended):
 
 | Tool | Install |
