@@ -43,14 +43,30 @@ export function PlacesView() {
 
   const set = (patch: Partial<PlaceFilter>) => setFilter((f) => ({ ...f, ...patch }));
 
-  // Group by country for the list layout.
+  // Grouped by country (biggest first). Inside a country there are no sub-headings, but places in the same
+  // city sit together: the city itself first, then its places (in the chosen sort order).
   const groups = useMemo(() => {
     const g = new Map<string, typeof places>();
     places.forEach((p) => {
       const key = p.country ?? "Unknown";
       g.set(key, [...(g.get(key) ?? []), p]);
     });
-    return [...g.entries()].sort((a, b) => b[1].length - a[1].length);
+    const cityOf = (p: (typeof places)[number]) => (p.city ?? p.canonicalName).toLowerCase();
+    return [...g.entries()]
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+      .map(([country, items]) => {
+        const perCity = new Map<string, number>();
+        items.forEach((p) => perCity.set(cityOf(p), (perCity.get(cityOf(p)) ?? 0) + 1));
+        const order = new Map(items.map((p, i) => [p.id, i]));
+        const isArea = (p: (typeof places)[number]) => p.category === "city" || p.category === "region";
+        const sorted = [...items].sort((a, b) => {
+          const ca = cityOf(a), cb = cityOf(b);
+          if (ca !== cb) return (perCity.get(cb)! - perCity.get(ca)!) || ca.localeCompare(cb);
+          if (isArea(a) !== isArea(b)) return isArea(a) ? -1 : 1;
+          return order.get(a.id)! - order.get(b.id)!;
+        });
+        return [country, sorted] as const;
+      });
   }, [places]);
 
   return (
@@ -95,30 +111,37 @@ export function PlacesView() {
         filter.search ? <Empty icon="🔎" title="No matches">No saved place matches “{filter.search}”.</Empty> :
         <Empty icon="📍" title="No places yet">Scan your screenshots, import a Reel from Sources, or add a place you know with ＋ Add Place.</Empty>
       ) : layout === "grid" ? (
-        <div className="grid">
-          {places.map((p) => (
-            <div key={p.id} className="tile" onClick={() => nav.openPlace(p.id)}>
-              <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
-              <div className="tile-body">
-                <div className="row"><span className="tile-title grow">{p.canonicalName}</span><StatusBadge place={p} /></div>
-                <PlaceLine place={p} />
-                <div className="row wrap">
-                  <CategoryChip category={p.category} />
-                  <span className="muted small">{p.sourceCount} source{p.sourceCount === 1 ? "" : "s"}</span>
-                  {p.verification === "needsReview" && <Pill tone="warn">unconfirmed</Pill>}
-                  {warnings[p.id] && <Pill tone="warn" title={warnings[p.id].map((w) => w.title).join("\n")}>⚠️ {warnings[p.id].length}</Pill>}
-                  {p.memoryCount > 0 && <span className="muted small">📷 {p.memoryCount}</span>}
-                </div>
+        <div className="stack">
+          {groups.map(([country, items]) => (
+            <section key={country} className="country-section">
+              <h3 className="country-head"><Flag code={items[0].countryCode} name={country} /> {country}<span className="muted">{items.length}</span></h3>
+              <div className="grid">
+                {items.map((p) => (
+                <div key={p.id} className="tile" onClick={() => nav.openPlace(p.id)}>
+                  <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
+                  <div className="tile-body">
+                    <div className="row"><span className="tile-title grow">{p.canonicalName}</span><StatusBadge place={p} /></div>
+                    <PlaceLine place={p} />
+                    <div className="row wrap">
+                      <CategoryChip category={p.category} />
+                      <span className="muted small">{p.sourceCount} source{p.sourceCount === 1 ? "" : "s"}</span>
+                      {p.verification === "needsReview" && <Pill tone="warn">unconfirmed</Pill>}
+                      {warnings[p.id] && <Pill tone="warn" title={warnings[p.id].map((w) => w.title).join("\n")}>⚠️ {warnings[p.id].length}</Pill>}
+                      {p.memoryCount > 0 && <span className="muted small">📷 {p.memoryCount}</span>}
+                    </div>
 
+                  </div>
+                </div>
+                ))}
               </div>
-            </div>
+            </section>
           ))}
         </div>
       ) : (
         <div className="stack">
           {groups.map(([country, items]) => (
             <div key={country}>
-              <h4 className="row" style={{ margin: "10px 0 6px", gap: 6 }}><Flag code={items[0].countryCode} name={country} /> {country} · {items.length}</h4>
+              <h3 className="country-head"><Flag code={items[0].countryCode} name={country} /> {country}<span className="muted">{items.length}</span></h3>
               <div className="list">
                 {items.map((p) => (
                   <div key={p.id} className="list-row" onClick={() => nav.openPlace(p.id)}>
