@@ -6,6 +6,9 @@
 	<string>com.travelsnapmap.photos-bridge</string>
 	<key>CFBundleName</key>
 	<string>TravelSnapMap Photos Bridge</string>
+	<!-- A background helper: never a Dock icon or menu bar of its own. -->
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>TravelSnapMap transcribes the voice in Instagram Reels you import, on your Mac, to find travel tips.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

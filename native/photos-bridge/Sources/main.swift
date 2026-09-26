@@ -7,9 +7,12 @@
 //
 // No business logic lives here: no database, no AI, no scoring. Only Apple frameworks.
 
+import AppKit
 import Foundation
 
 Responsibility.disclaimIfNeeded()
+// Image previews use AppKit; without this macOS would give the helper its own Dock icon.
+NSApplication.shared.setActivationPolicy(.prohibited)
 let output = OutputWriter()
 
 func handle(_ method: String, _ params: [String: Any]) async throws -> Any {
