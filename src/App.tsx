@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppService, isTauri } from "./api/services";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProcessingBar } from "./components/ProcessingBar";
 import { MapView } from "./features/map/MapView";
 import { PlaceDetail } from "./features/places/PlaceDetail";
@@ -31,6 +32,14 @@ function Shell() {
   }, [nav.refresh]);
 
   const top = nav.panels[nav.panels.length - 1];
+  // Symmetric motion: the sheet leaves the way it came in (to the right) before it unmounts.
+  const [closing, setClosing] = useState(false);
+  const dismiss = (all: boolean) => {
+    if (!all && nav.panels.length > 1) { nav.back(); return; }
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setClosing(true);
+    window.setTimeout(() => { setClosing(false); nav.closePanels(); }, reduced ? 150 : 220);
+  };
 
   return (
     <div className="app">
@@ -54,23 +63,27 @@ function Shell() {
       </aside>
 
       <main className="content">
-        {nav.view === "map" && <MapView />}
-        {nav.view === "places" && <PlacesView />}
-        {nav.view === "screenshots" && <SourcesView />}
-        {nav.view === "review" && <ReviewView />}
-        {nav.view === "trips" && <TripsView />}
-        {nav.view === "settings" && <SettingsView />}
+        <ErrorBoundary key={nav.view} label={NAV.find((n) => n.view === nav.view)?.label}>
+          {nav.view === "map" && <MapView />}
+          {nav.view === "places" && <PlacesView />}
+          {nav.view === "screenshots" && <SourcesView />}
+          {nav.view === "review" && <ReviewView />}
+          {nav.view === "trips" && <TripsView />}
+          {nav.view === "settings" && <SettingsView />}
+        </ErrorBoundary>
 
         {top && (
-          <div className="panel-backdrop" onMouseDown={nav.closePanels}>
+          <div className={closing ? "panel-backdrop closing" : "panel-backdrop"} onMouseDown={() => dismiss(true)}>
             <section className="panel" onMouseDown={(e) => e.stopPropagation()}>
               <div className="panel-nav">
-                <button className="btn ghost" onClick={nav.back}>← Back</button>
-                <button className="icon-btn" onClick={nav.closePanels} aria-label="Close">✕</button>
+                <button className="btn ghost" onClick={() => dismiss(false)}>← Back</button>
+                <button className="icon-btn" onClick={() => dismiss(true)} aria-label="Close">✕</button>
               </div>
-              {top.type === "place" && <PlaceDetail key={top.id} id={top.id} />}
-              {top.type === "screenshot" && <ScreenshotDetail key={top.id} id={top.id} highlight={top.highlight} />}
-              {top.type === "reel" && <ReelDetail key={top.id} id={top.id} seek={top.seek} />}
+              <ErrorBoundary key={top.id} label="This page">
+                {top.type === "place" && <PlaceDetail key={top.id} id={top.id} />}
+                {top.type === "screenshot" && <ScreenshotDetail key={top.id} id={top.id} highlight={top.highlight} />}
+                {top.type === "reel" && <ReelDetail key={top.id} id={top.id} seek={top.seek} />}
+              </ErrorBoundary>
             </section>
           </div>
         )}

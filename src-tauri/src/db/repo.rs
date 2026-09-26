@@ -239,7 +239,9 @@ impl Database {
             )?;
             tx.execute(
                 &format!(
-                    "UPDATE screenshots SET status = '{}', status_detail = NULL, classification = 'unknown', escalation_level = 0 WHERE id = ?1",
+                    "UPDATE screenshots SET status = '{}', status_detail = NULL, classification = 'unknown', escalation_level = 0, \
+                     ai_model = NULL, ai_thinking = 0, ai_image_used = 0, ai_input_tokens = 0, ai_output_tokens = 0, ai_latency_ms = 0, \
+                     ai_retry_count = 0, ai_cost = 0, places_extracted = 0, places_auto_resolved = 0, pipeline_ms = 0 WHERE id = ?1",
                     if keep_ocr { "ocrComplete" } else { "discovered" }
                 ),
                 [screenshot_id],
@@ -278,9 +280,8 @@ impl Database {
 
     pub fn cached_extraction_for_screenshot(&self, screenshot_id: &str) -> Result<Option<String>> {
         self.with(|c| c.query_row(
-            "SELECT a.result_json FROM ai_cache a JOIN screenshots s ON s.ocr_hash = a.ocr_hash \
-             WHERE s.id = ?1 AND a.kind = 'extraction' ORDER BY a.prompt_version DESC LIMIT 1",
-            [screenshot_id],
+            "SELECT result_json FROM ai_cache WHERE ocr_hash = ?1 AND kind = 'extraction' ORDER BY prompt_version DESC, created_at DESC LIMIT 1",
+            [format!("shot:{screenshot_id}")],
             |r| r.get(0),
         ).optional())
     }

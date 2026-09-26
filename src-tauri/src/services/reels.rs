@@ -28,6 +28,13 @@ pub trait ReelFetcher: Send + Sync {
     async fn download(&self, url: &str, meta: &ReelMetadata, out: &Path, config: &AppConfig) -> Result<Option<String>>;
     async fn download_file(&self, url: &str, out: &Path) -> Result<()>;
     fn yt_dlp(&self, config: &AppConfig) -> Option<PathBuf>;
+
+    /// Metadata and video together (one round-trip when the backend supports it).
+    async fn fetch(&self, url: &str, out: &Path, config: &AppConfig) -> Result<(ReelMetadata, Option<String>)> {
+        let meta = self.metadata(url, config).await?;
+        let source = self.download(url, &meta, out, config).await?;
+        Ok((meta, source))
+    }
 }
 
 /// Shortcode from an Instagram Reel/Post URL (identifies the same Reel across links).
@@ -78,6 +85,46 @@ impl InstagramFetcher {
 
 #[async_trait]
 impl ReelFetcher for InstagramFetcher {
+    /// One yt-dlp run prints the metadata and downloads the video (saves a process start and a round-trip).
+    async fn fetch(&self, url: &str, out: &Path, config: &AppConfig) -> Result<(ReelMetadata, Option<String>)> {
+        if let Some(bin) = self.yt_dlp(config) {
+            if let Some(dir) = out.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let out_str = out.to_string_lossy().to_string();
+            let args = ["-j", "--no-simulate", "-f", "b[ext=mp4][vcodec!=none][acodec!=none]/b[ext=mp4]/b", "-o", out_str.as_str(), "--force-overwrites", url];
+            // Instagram briefly rate-limits anonymous requests; retry with a pause before falling back.
+            for attempt in 0..3u64 {
+                match self.run_yt_dlp(&bin, &args, config).await {
+                    Ok(json) => {
+                        if let Some(v) = json.lines().rev().find_map(|l| serde_json::from_str::<Value>(l).ok().filter(|v| v.is_object())) {
+                            return Ok((from_yt_dlp(&v), out.exists().then(|| "ytdlp".to_string())));
+                        }
+                        break; // no media info (e.g. login-only post): don't hammer Instagram
+                    }
+                    Err(e) => {
+                        log::warn!(target: "reels", "yt-dlp attempt {} failed: {e}", attempt + 1);
+                        let msg = e.to_string().to_lowercase();
+                        let transient = msg.contains("rate") || msg.contains("429") || msg.contains("try again") || msg.contains("timed out") || msg.contains("unable to download");
+                        if !transient || attempt == 2 {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(6 * (attempt + 1))).await;
+                    }
+                }
+            }
+        }
+        let html = self.http.get(url).send().await?.text().await?;
+        let meta = parse_open_graph(&html);
+        let mut source = None;
+        if let Some(video) = &meta.video_url {
+            if self.download_file(video, out).await.is_ok() && out.exists() {
+                source = Some("og".to_string());
+            }
+        }
+        Ok((meta, source))
+    }
+
     fn yt_dlp(&self, config: &AppConfig) -> Option<PathBuf> {
         let explicit = config.yt_dlp_path.trim();
         if !explicit.is_empty() {

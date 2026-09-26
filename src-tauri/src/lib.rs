@@ -6,6 +6,7 @@ mod countries;
 mod db;
 mod models;
 mod pipeline;
+mod secrets;
 mod services;
 mod text;
 
@@ -18,7 +19,7 @@ use std::time::Duration;
 use tauri::{Emitter, Manager};
 
 use crate::db::Database;
-use crate::pipeline::queue::ProcessingQueue;
+use crate::pipeline::queue::{ProcessingQueue, RunMode};
 use crate::pipeline::Pipeline;
 use crate::services::ai::deepseek::DeepSeekTravelAIService;
 use crate::services::native::{NativeBridge, PhotoLibraryService};
@@ -38,17 +39,45 @@ fn load_env() {
     }
 }
 
+/// Logs to ~/Library/Logs/TravelSnapMap/travelsnapmap.log (rotated at 5 MB) and to stderr in development.
+/// Screenshot contents are never logged.
+fn init_logging() {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    if !cfg!(debug_assertions) {
+        if let Ok(home) = std::env::var("HOME") {
+            let dir = std::path::PathBuf::from(home).join("Library/Logs/TravelSnapMap");
+            let path = dir.join("travelsnapmap.log");
+            let _ = std::fs::create_dir_all(&dir);
+            if std::fs::metadata(&path).map(|m| m.len() > 5_000_000).unwrap_or(false) {
+                let _ = std::fs::rename(&path, dir.join("travelsnapmap.1.log"));
+            }
+            if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                builder.target(env_logger::Target::Pipe(Box::new(file)));
+            }
+        }
+    }
+    let _ = builder.try_init();
+}
+
 pub fn run() {
     load_env();
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).try_init();
+    init_logging();
+    log::info!("TravelSnapMap {} starting", env!("CARGO_PKG_VERSION"));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db = Arc::new(Database::open(&data_dir.join("travelsnapmap.sqlite"))?);
             let config = db.config();
-            let (api_key, _) = config::resolve_api_key(db.setting("deepseekApiKey")?);
+            // Older builds stored a pasted key in SQLite: move it to the Keychain and delete the plain copy.
+            if let Some(old) = db.setting("deepseekApiKey")? {
+                if secrets::set_deepseek_key(Some(&old)).is_ok() {
+                    db.set_setting("deepseekApiKey", None)?;
+                }
+            }
+            let (api_key, _) = config::resolve_api_key();
 
             let bridge = Arc::new(NativeBridge::new(NativeBridge::locate_binary()));
             let places = Arc::new(PlaceService::new(bridge.clone()));
@@ -80,12 +109,19 @@ pub fn run() {
                 let status = observer_bridge.authorization_status().await.unwrap_or_default();
                 if status == "authorized" || status == "limited" {
                     let _ = observer_bridge.observe_new_screenshots().await;
+                    if handle.state::<AppState>().pipeline.config().auto_process_new_screenshots {
+                        tauri::async_runtime::spawn(observer_queue.clone().run(RunMode::ScanNew));
+                    }
                 }
                 let mut events = observer_bridge.subscribe();
                 while let Ok(event) = events.recv().await {
                     if event == "photosLibraryChanged" {
                         let _ = handle.emit("library-changed", ());
-                        tauri::async_runtime::spawn(observer_queue.clone().run(true, None));
+                        // Only when the user turned on automatic processing (off by default).
+                        let auto = handle.state::<AppState>().pipeline.config().auto_process_new_screenshots;
+                        if auto {
+                            tauri::async_runtime::spawn(observer_queue.clone().run(RunMode::ScanNew));
+                        }
                     }
                 }
             });
@@ -93,13 +129,18 @@ pub fn run() {
             // Work parked while offline (or at the daily AI limit) resumes periodically.
             let retry_queue = queue.clone();
             let retry_state = app.state::<AppState>().db.clone();
+            let retry_pipeline = app.state::<AppState>().pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     tokio::time::sleep(Duration::from_secs(300)).await;
                     let waiting = retry_state.screenshot_counts().ok()
                         .and_then(|c| c.get("waitingForNetwork").copied()).unwrap_or(0);
                     if waiting > 0 && !retry_queue.snapshot().running {
-                        retry_queue.clone().run(false, None).await;
+                        retry_queue.clone().run(RunMode::Waiting).await;
+                    }
+                    // Reels parked the same way.
+                    for id in retry_state.reel_ids_needing_processing().unwrap_or_default() {
+                        retry_pipeline.process_reel(&id).await;
                     }
                 }
             });
@@ -155,6 +196,13 @@ pub fn run() {
             commands::reel_action,
             commands::reel_tool_status,
             commands::open_external,
+            commands::scan_preview,
+            commands::add_screenshot_folder,
+            commands::remove_screenshot_folder,
+            commands::list_runs,
+            commands::run_report,
+            commands::retranscribe_reel,
+            commands::speech_locales,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TravelSnapMap");

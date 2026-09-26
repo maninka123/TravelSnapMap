@@ -3,6 +3,7 @@
 pub mod records;
 mod reels_repo;
 mod repo;
+mod runs_repo;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ use crate::config::AppConfig;
 use crate::services::ai::types::AiUsage;
 pub use records::*;
 pub use reels_repo::FactProvenance;
+pub use runs_repo::{RunRecord, RunReport};
 pub use repo::{PlaceFilter, ScreenshotFilter};
 
 pub fn now() -> String {
@@ -29,7 +31,7 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 impl Database {
     pub fn open(path: &Path) -> Result<Self> {
@@ -54,7 +56,10 @@ impl Database {
         if version < 2 {
             conn.execute_batch(&format!("BEGIN; {} PRAGMA user_version = 2; COMMIT;", include_str!("migration_v2.sql")))?;
         }
-        debug_assert!(SCHEMA_VERSION == 2);
+        if version < 3 {
+            conn.execute_batch(&format!("BEGIN; {} PRAGMA user_version = 3; COMMIT;", include_str!("migration_v3.sql")))?;
+        }
+        debug_assert!(SCHEMA_VERSION == 3);
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -88,7 +93,10 @@ impl Database {
     }
 
     pub fn config(&self) -> AppConfig {
-        self.setting("config").ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        self.setting("config").ok().flatten()
+            .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
+            .map(AppConfig::upgraded)
+            .unwrap_or_default()
     }
 
     pub fn save_config(&self, config: &AppConfig) -> Result<()> {

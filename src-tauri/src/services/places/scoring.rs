@@ -47,12 +47,19 @@ pub fn rank(candidates: &[PlaceCandidate], place: &ExtractedPlace, ctx: &Resolut
             let name_sim = best_similarity(&c.name, &names);
             let mut score = 0.6 * name_sim;
 
+            let near = c.near_distance_km;
             if place.country.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) {
-                let matches = match (&wanted_country, &c.country_code) {
-                    (Some(w), Some(have)) => w.eq_ignore_ascii_case(have),
-                    _ => normalize(place.country.as_deref().unwrap_or("")) == normalize(c.country.as_deref().unwrap_or("")),
-                };
-                score += if matches { 0.25 } else { -0.3 };
+                let known = c.country_code.as_deref().filter(|s| !s.is_empty()).is_some() || c.country.as_deref().is_some_and(|s| !s.trim().is_empty());
+                if known {
+                    let matches = match (&wanted_country, &c.country_code) {
+                        (Some(w), Some(have)) => w.eq_ignore_ascii_case(have),
+                        _ => normalize(place.country.as_deref().unwrap_or("")) == normalize(c.country.as_deref().unwrap_or("")),
+                    };
+                    score += if matches { 0.25 } else { -0.3 };
+                } else if near.is_some_and(|d| d < 1500.0) {
+                    // Maps omitted the country, but the result is inside the area we searched.
+                    score += 0.2;
+                }
             } else {
                 score += 0.1;
             }
@@ -61,6 +68,12 @@ pub fn rank(candidates: &[PlaceCandidate], place: &ExtractedPlace, ctx: &Resolut
                 let haystack = normalize(&[c.city.clone(), c.region.clone(), c.address.clone()].into_iter().flatten().collect::<Vec<_>>().join(" "));
                 if haystack.contains(&city) {
                     score += 0.15;
+                } else if let Some(d) = near {
+                    // Distance from the city we searched around: close is good, far is a different place.
+                    // (Real case: "Kameyama" in a Kyoto itinerary matched Kameyama city ~70 km away.)
+                    if d < 25.0 { score += 0.1 } else if d > 40.0 { score -= 0.25 }
+                } else if c.city.as_deref().is_some_and(|x| !x.trim().is_empty()) {
+                    score -= 0.1;
                 }
             }
 
@@ -68,7 +81,7 @@ pub fn rank(candidates: &[PlaceCandidate], place: &ExtractedPlace, ctx: &Resolut
                 let g = hint.group();
                 if g == wanted_group {
                     score += 0.05;
-                } else if !matches!(g, "any" | "area") && !matches!(wanted_group, "any" | "area") {
+                } else if name_sim < 0.95 && !matches!(g, "any" | "area") && !matches!(wanted_group, "any" | "area") {
                     score -= 0.1;
                 }
             }
@@ -201,11 +214,82 @@ mod tests {
         place.ambiguous = Some(true);
         let cands = vec![
             cand("Shibuya Sky", 35.658, 139.702, "Japan", "JP", "Tokyo"),
-            cand("Shibuya Sky Deck", 35.66, 139.70, "Japan", "JP", "Shibuya"),
+            cand("Shibuya Sky Deck", 35.66, 139.70, "Japan", "JP", "Tokyo"),
         ];
         let mut cands2 = cands.clone();
         cands2[1].latitude = 35.70; // far enough not to be the same spot
         let result = decide(&rank(&cands2, &place, &ResolutionContext::default()), &place, &AppConfig::default());
         assert_ne!(result.decision, Decision::AutoAccept);
+    }
+}
+
+#[cfg(test)]
+mod real_cases {
+    use super::*;
+
+    /// Real case: Maps returned the exact place without a country, categorised as a restaurant.
+    #[test]
+    fn exact_name_near_the_hint_without_country_is_accepted() {
+        let mut place = ExtractedPlace::named("Matterhorn Glacier Paradise");
+        place.city = Some("Zermatt".into());
+        place.country = Some("Switzerland".into());
+        place.category = Some("viewpoint".into());
+        let cand = PlaceCandidate {
+            name: "Matterhorn Glacier Paradise".into(), latitude: 46.0148, longitude: 7.7429,
+            category: Some("Restaurant".into()), near_distance_km: Some(6.0), ..Default::default()
+        };
+        let result = decide(&rank(&[cand], &place, &ResolutionContext::default()), &place, &AppConfig::default());
+        assert_eq!(result.decision, Decision::AutoAccept, "confidence {}", result.confidence);
+    }
+
+    /// Real case: the official name is longer than the one in the screenshot.
+    #[test]
+    fn short_name_inside_official_name() {
+        let mut place = ExtractedPlace::named("Wangxian Valley");
+        place.country = Some("China".into());
+        let cand = PlaceCandidate {
+            name: "Wangxian Valley Qingchuanxingguan - Wangxian Valley Scenic Area".into(), latitude: 28.8, longitude: 117.8,
+            country: Some("China".into()), country_code: Some("CN".into()), ..Default::default()
+        };
+        let result = decide(&rank(&[cand], &place, &ResolutionContext::default()), &place, &AppConfig::default());
+        assert_eq!(result.decision, Decision::AutoAccept, "confidence {}", result.confidence);
+    }
+}
+
+#[cfg(test)]
+mod real_reel_cases {
+    use super::*;
+
+    /// Real case: "Arashiyu Gion Foot Spa" (Kyoto) was matched to Gion in Hiroshima.
+    #[test]
+    fn same_name_in_another_city_is_not_accepted() {
+        let mut place = ExtractedPlace::named("Arashiyu Gion Foot Spa");
+        place.city = Some("Kyoto".into());
+        place.country = Some("Japan".into());
+        let cand = PlaceCandidate {
+            name: "Gion".into(), latitude: 34.4, longitude: 132.46, city: Some("Hiroshima".into()),
+            country: Some("Japan".into()), country_code: Some("JP".into()), near_distance_km: Some(300.0), ..Default::default()
+        };
+        let result = decide(&rank(&[cand], &place, &ResolutionContext::default()), &place, &AppConfig::default());
+        assert_eq!(result.decision, Decision::Reject, "confidence {}", result.confidence);
+    }
+}
+
+#[cfg(test)]
+mod real_itinerary_cases {
+    use super::*;
+
+    /// Real case: a Kyoto itinerary's "Kameyama" (a park in Arashiyama) matched Kameyama city in Mie (~70 km).
+    #[test]
+    fn same_named_town_outside_the_city_is_not_auto_accepted() {
+        let mut place = ExtractedPlace::named("Kameyama");
+        place.city = Some("Kyoto".into());
+        place.country = Some("Japan".into());
+        let cand = PlaceCandidate {
+            name: "Kameyama".into(), latitude: 34.856, longitude: 136.45, city: Some("Kameyama".into()),
+            country: Some("Japan".into()), country_code: Some("JP".into()), near_distance_km: Some(70.0), ..Default::default()
+        };
+        let result = decide(&rank(&[cand], &place, &ResolutionContext::default()), &place, &AppConfig::default());
+        assert_ne!(result.decision, Decision::AutoAccept, "confidence {}", result.confidence);
     }
 }

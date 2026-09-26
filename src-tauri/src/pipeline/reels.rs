@@ -14,7 +14,7 @@ use crate::db::{ReelRecord, TranscriptSegment};
 use crate::models::*;
 use crate::services::ai::local_filter;
 use crate::services::ai::types::*;
-use crate::services::native::WordTiming;
+use crate::services::native::{SpeechLocale, Transcription, WordTiming};
 use crate::services::reels::{is_instagram_url, shortcode};
 use crate::text::normalize;
 
@@ -83,6 +83,61 @@ pub fn build_reel_lines(caption: Option<&str>, transcript: &[TranscriptSegment],
     (lines, sources)
 }
 
+/// Below this mean word confidence a transcript is treated as music/lyrics rather than speech.
+pub const MIN_SPEECH_CONFIDENCE: f64 = 0.7;
+
+/// Stages shown for every Reel, in display order.
+pub const STAGES: [&str; 8] = ["caption", "video", "audio", "transcript", "keyframes", "ocr", "ai", "places"];
+
+/// Default speech locale for a detected language (BCP-47 language → locale).
+const DEFAULT_LOCALES: &[(&str, &str)] = &[
+    ("en", "en-US"), ("ja", "ja-JP"), ("zh-Hans", "zh-CN"), ("zh-Hant", "zh-TW"), ("zh", "zh-CN"), ("yue", "yue-CN"),
+    ("ko", "ko-KR"), ("ta", "ta-IN"), ("si", "si-LK"), ("hi", "hi-IN"), ("bn", "bn-IN"), ("th", "th-TH"),
+    ("vi", "vi-VN"), ("id", "id-ID"), ("ms", "ms-MY"), ("fr", "fr-FR"), ("de", "de-DE"), ("es", "es-ES"),
+    ("it", "it-IT"), ("pt", "pt-BR"), ("ru", "ru-RU"), ("ar", "ar-SA"), ("tr", "tr-TR"), ("nl", "nl-NL"),
+];
+
+fn locale_for_language(lang: &str, supported: &[SpeechLocale]) -> Option<String> {
+    let base = lang.split('-').next().unwrap_or(lang);
+    let preferred = DEFAULT_LOCALES.iter().find(|(l, _)| *l == lang).or_else(|| DEFAULT_LOCALES.iter().find(|(l, _)| *l == base)).map(|(_, loc)| loc.to_string());
+    if supported.is_empty() {
+        return preferred;
+    }
+    if let Some(p) = preferred.filter(|p| supported.iter().any(|s| s.id.eq_ignore_ascii_case(p))) {
+        return Some(p);
+    }
+    // Any supported locale of the same language, preferring on-device ones.
+    let mut same: Vec<&SpeechLocale> = supported.iter().filter(|s| s.id.split('-').next() == Some(base)).collect();
+    same.sort_by_key(|s| !s.on_device);
+    same.first().map(|s| s.id.clone())
+}
+
+/// Locales to try, in order. A specific choice is used as-is (the bridge explains if unsupported);
+/// "auto" uses language hints from the caption and on-screen text, then English.
+pub fn candidate_locales(requested: &str, hints: &[(String, f64)], supported: &[SpeechLocale]) -> Vec<String> {
+    if !requested.eq_ignore_ascii_case("auto") && !requested.is_empty() {
+        return vec![requested.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    // Only confident hints; noisy on-screen text otherwise sends Auto to the wrong language first.
+    for (lang, p) in hints {
+        if *p >= 0.8 {
+            if let Some(loc) = locale_for_language(lang, supported) {
+                if !out.contains(&loc) { out.push(loc); }
+            }
+        }
+    }
+    if let Some(en) = locale_for_language("en", supported) {
+        if !out.contains(&en) { out.push(en); }
+    }
+    out
+}
+
+/// Confidence weighted by how much speech was recognised.
+fn transcript_score(t: &Transcription) -> f64 {
+    t.confidence() * (t.words.len().min(10) as f64 / 10.0)
+}
+
 fn mmss(t: f64) -> String {
     let s = t.max(0.0) as u64;
     format!("{:02}:{:02}", s / 60, s % 60)
@@ -118,6 +173,12 @@ impl Pipeline {
         Ok(id)
     }
 
+    /// Re-transcribe with a specific locale ("auto" to detect again), then update the extraction.
+    pub async fn retranscribe_reel(&self, id: &str, locale: &str) -> ProcessingStatus {
+        let _ = self.db.set_transcript_override(id, Some(locale));
+        self.reprocess_reel(id).await
+    }
+
     pub async fn reprocess_reel(&self, id: &str) -> ProcessingStatus {
         let _ = self.db.clear_reel_derived(id);
         self.process_reel(id).await
@@ -148,104 +209,134 @@ impl Pipeline {
         let config = self.config();
         let mut reel = self.db.reel(id).map_err(fail)?.ok_or_else(|| Stop::Failed("Reel not found".into()))?;
         let dir = self.reel_dir(id);
-
-        // 1. Metadata + media (skipped when a video is already saved, e.g. imported from Photos).
-        let has_media = reel.media_path.as_ref().is_some_and(|p| std::path::Path::new(p).exists());
-        if !has_media && reel.url.starts_with("http") {
-            self.db.set_reel_status(id, ProcessingStatus::Loading, Some("Fetching Reel")).map_err(fail)?;
-            self.notify();
-            let meta = match self.fetcher.metadata(&reel.url, &config).await {
-                Ok(m) => m,
-                Err(e) if e.to_string().to_lowercase().contains("connect") || e.to_string().contains("dns") => {
-                    return Err(Stop::Waiting(format!("Offline: {e}")));
-                }
-                Err(e) => {
-                    log::warn!(target: "reels", "metadata unavailable: {e}");
-                    Default::default()
+        self.db.reset_reel_stages(id).map_err(fail)?;
+        for s in STAGES {
+            let _ = self.db.set_reel_stage(id, s, "pending", None);
+        }
+        // Every stage records its outcome and duration; a failed stage never stops the stages after it.
+        let started: std::sync::Mutex<std::collections::HashMap<String, Instant>> = Default::default();
+        let stage = |name: &str, status: &str, detail: Option<String>| {
+            let detail = if status == "running" {
+                started.lock().unwrap().insert(name.to_string(), Instant::now());
+                detail
+            } else {
+                let took = started.lock().unwrap().remove(name).map(|t| format!("{:.1} s", t.elapsed().as_secs_f64()));
+                match (detail, took) {
+                    (Some(d), Some(t)) => Some(format!("{d} · {t}")),
+                    (None, t) => t,
+                    (d, None) => d,
                 }
             };
-            self.db.set_reel_metadata(id, meta.creator.as_deref(), meta.caption.as_deref(), meta.posted_at.as_deref(), None).map_err(fail)?;
-            let video = dir.join("video.mp4");
-            if let Ok(Some(source)) = self.fetcher.download(&reel.url, &meta, &video, &config).await {
-                self.db.set_reel_media(id, &video.to_string_lossy(), &source, meta.duration_sec).map_err(fail)?;
-            } else if let Some(thumb) = &meta.thumbnail_url {
-                let cover = dir.join("cover.jpg");
-                if self.fetcher.download_file(thumb, &cover).await.is_ok() {
-                    self.db.set_reel_metadata(id, None, None, None, Some(&cover.to_string_lossy())).map_err(fail)?;
-                }
-            }
-            reel = self.db.reel(id).map_err(fail)?.unwrap_or(reel);
-        }
-        let media = reel.media_path.clone().filter(|p| std::path::Path::new(p).exists()).map(PathBuf::from);
-
-        // 2. Audio first: save the voice track and transcribe it on-device with timestamps.
-        let mut frames_text: Vec<(f64, Vec<String>)> = Vec::new();
-        let mut transcript = reel.transcript.clone();
-        let mut notes: Vec<String> = Vec::new();
-        if let Some(video) = &media {
-            self.db.set_reel_status(id, ProcessingStatus::OcrProcessing, Some("Transcribing audio")).map_err(fail)?;
+            let _ = self.db.set_reel_stage(id, name, status, detail.as_deref());
             self.notify();
-            let t = Instant::now();
-            match self.media.extract_audio(video, &dir.join("audio.m4a")).await {
-                Ok((Some(audio), duration)) => {
-                    let _ = self.db.set_reel_media(id, &video.to_string_lossy(), reel.media_source.as_deref().unwrap_or("photos"), Some(duration));
-                    match self.media.transcribe(&audio, &config.transcription_locale).await {
-                        Ok(tr) => {
-                            transcript = group_words(&tr.words);
-                            let locale = format!("{}{}", tr.locale, if tr.on_device { "" } else { ", Apple server" });
-                            self.db.set_reel_transcript(id, Some(&audio.to_string_lossy()), &transcript, Some(&locale)).map_err(fail)?;
-                        }
-                        Err(e) => {
-                            notes.push(format!("transcription unavailable: {e}"));
-                            self.db.set_reel_transcript(id, Some(&audio.to_string_lossy()), &[], None).map_err(fail)?;
+        };
+        let short = |e: &dyn std::fmt::Display| e.to_string().chars().take(160).collect::<String>();
+
+        // 1–2. Caption/metadata and the video — a single yt-dlp call when available.
+        let had_media = reel.media_path.as_ref().is_some_and(|p| std::path::Path::new(p).exists());
+        self.db.set_reel_status(id, ProcessingStatus::Loading, Some("Fetching Reel")).map_err(fail)?;
+        if reel.url.starts_with("http") {
+            stage("caption", "running", None);
+            if !had_media {
+                stage("video", "running", None);
+            }
+            let video = dir.join("video.mp4");
+            let fetched = if had_media {
+                self.fetcher.metadata(&reel.url, &config).await.map(|m| (m, None))
+            } else {
+                self.fetcher.fetch(&reel.url, &video, &config).await
+            };
+            match fetched {
+                Ok((meta, source)) => {
+                    self.db.set_reel_metadata(id, meta.creator.as_deref(), meta.caption.as_deref(), meta.posted_at.as_deref(), None).map_err(fail)?;
+                    match &meta.caption {
+                        Some(c) => stage("caption", "done", Some(format!("{} characters{}", c.chars().count(),
+                            meta.creator.as_ref().map(|h| format!(" · {h}")).unwrap_or_default()))),
+                        None => stage("caption", "skipped", Some("No caption available".into())),
+                    }
+                    if had_media {
+                        stage("video", "done", Some("Already saved".into()));
+                    } else if let Some(source) = source {
+                        self.db.set_reel_media(id, &video.to_string_lossy(), &source, meta.duration_sec).map_err(fail)?;
+                        stage("video", "done", Some(if source == "ytdlp" { "Downloaded with yt-dlp".into() } else { "Downloaded from the page".into() }));
+                    } else {
+                        let why = if self.fetcher.yt_dlp(&config).is_none() {
+                            "Instagram didn't provide the video (install yt-dlp, or import it from Photos)"
+                        } else {
+                            "Instagram didn't provide the video (try browser cookies in Settings, or import it from Photos)"
+                        };
+                        stage("video", "failed", Some(why.into()));
+                        if let Some(thumb) = &meta.thumbnail_url {
+                            let cover = dir.join("cover.jpg");
+                            if self.fetcher.download_file(thumb, &cover).await.is_ok() {
+                                let _ = self.db.set_reel_metadata(id, None, None, None, Some(&cover.to_string_lossy()));
+                            }
                         }
                     }
                 }
-                Ok((None, duration)) => {
-                    let _ = self.db.set_reel_media(id, &video.to_string_lossy(), reel.media_source.as_deref().unwrap_or("photos"), Some(duration));
-                    notes.push("no audio track".into());
+                Err(e) => {
+                    let msg = e.to_string().to_lowercase();
+                    let offline = msg.contains("connect") || msg.contains("dns") || msg.contains("offline") || msg.contains("network");
+                    stage("caption", "failed", Some(if offline { "Offline".into() } else { short(&e) }));
+                    if !had_media {
+                        stage("video", "failed", Some(if offline { "Offline".into() } else { short(&e) }));
+                    }
+                    if offline {
+                        return Err(Stop::Waiting(format!("Offline: {}", short(&e))));
+                    }
                 }
-                Err(e) => notes.push(format!("audio extraction failed: {e}")),
             }
-            self.time("reels.transcribe", t);
-
-            // 3. Secondary: OCR on a handful of visually distinct key frames (never every frame).
-            self.db.set_reel_status(id, ProcessingStatus::OcrProcessing, Some("Reading key frames")).map_err(fail)?;
-            self.notify();
-            let t = Instant::now();
-            let frames_dir = dir.join("frames");
-            let _ = std::fs::remove_dir_all(&frames_dir);
-            if let Ok((_, frames)) = self.media.keyframes(video, &frames_dir, config.max_keyframes).await {
-                let mut rows = Vec::new();
-                for f in frames {
-                    let blocks = self.ocr.recognize(std::path::Path::new(&f.path)).await.unwrap_or_default();
-                    let ordered = super::reading_order(&blocks);
-                    let texts: Vec<String> = ordered.iter().map(|b| b.text.clone()).collect();
-                    let blocks_json = serde_json::to_string(&ordered.iter().map(|b| serde_json::json!({
-                        "text": b.text, "confidence": b.confidence, "x": b.x, "y": b.y, "width": b.width, "height": b.height
-                    })).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
-                    rows.push((f.time_sec, f.path.clone(), texts.join("\n"), blocks_json));
-                    frames_text.push((f.time_sec, texts));
-                }
-                self.db.replace_keyframes(id, &rows).map_err(fail)?;
-            }
-            self.time("reels.keyframes", t);
+        } else {
+            stage("caption", "skipped", Some("Imported from Photos — no caption".into()));
+            stage("video", if had_media { "done" } else { "failed" }, Some("Video from Photos".into()));
         }
         reel = self.db.reel(id).map_err(fail)?.unwrap_or(reel);
+        let media = reel.media_path.clone().filter(|p| std::path::Path::new(p).exists()).map(PathBuf::from);
 
-        // 4. One DeepSeek call on text evidence (audio → caption → on-screen text).
+        // 3–6. Audio → transcript and key snapshots → on-screen text run in parallel.
+        // The spoken language is hinted by the caption; without one, the on-screen text is read first.
+        let requested = reel.transcript_locale_override.clone().filter(|l| !l.is_empty())
+            .unwrap_or_else(|| config.transcription_locale.clone());
+        let caption_hint: String = reel.caption.clone().unwrap_or_default().split_whitespace()
+            .filter(|w| !w.starts_with('#') && !w.starts_with('@')).collect::<Vec<_>>().join(" ");
+        let (transcript, frames_text) = match &media {
+            Some(video) => {
+                self.db.set_reel_status(id, ProcessingStatus::OcrProcessing, Some("Reading audio and key frames")).map_err(fail)?;
+                if caption_hint.chars().count() >= 20 || !requested.eq_ignore_ascii_case("auto") {
+                    tokio::join!(
+                        self.reel_audio(id, video, &dir, &requested, &caption_hint, &stage),
+                        self.reel_frames(id, video, &dir, config.max_keyframes, &stage),
+                    )
+                } else {
+                    let frames = self.reel_frames(id, video, &dir, config.max_keyframes, &stage).await;
+                    let hint = frames.iter().flat_map(|(_, t)| t.clone()).collect::<Vec<_>>().join(" ");
+                    (self.reel_audio(id, video, &dir, &requested, &hint, &stage).await, frames)
+                }
+            }
+            None => {
+                for s in ["audio", "transcript", "keyframes", "ocr"] {
+                    stage(s, "skipped", Some("No video".into()));
+                }
+                (Vec::new(), Vec::new())
+            }
+        };
+        reel = self.db.reel(id).map_err(fail)?.unwrap_or(reel);
+
+        // 7. One DeepSeek call on text evidence (audio → caption → on-screen text).
         let (lines, line_sources) = build_reel_lines(reel.caption.as_deref(), &transcript, &frames_text);
         if lines.is_empty() {
-            let detail = if media.is_none() {
-                "Instagram didn't share this Reel's video or caption. Import the video from Photos to analyse it."
+            stage("ai", "skipped", Some("Nothing to analyse".into()));
+            stage("places", "skipped", None);
+            let (status, detail) = if media.is_none() {
+                (ProcessingStatus::NeedsMedia, "Instagram didn't share this Reel's video or caption. Import the video from Photos to analyse it.")
             } else {
-                "No speech, caption or on-screen text found."
+                (ProcessingStatus::NotTravel, "No speech, caption or on-screen text found.")
             };
-            self.db.finish_reel(id, if media.is_none() { ProcessingStatus::NeedsMedia } else { ProcessingStatus::NotTravel }, Some(detail)).map_err(fail)?;
-            return Ok(if media.is_none() { ProcessingStatus::NeedsMedia } else { ProcessingStatus::NotTravel });
+            self.db.finish_reel(id, status, Some(detail)).map_err(fail)?;
+            return Ok(status);
         }
         self.db.set_reel_status(id, ProcessingStatus::Extracting, Some("Understanding the Reel")).map_err(fail)?;
-        self.notify();
+        stage("ai", "running", None);
         let text_len: usize = lines.iter().map(|l| l.len()).sum();
         let cover = self.db.keyframes(id).ok().and_then(|k| k.into_iter().find(|f| f.is_cover));
         let image = if text_len < 60 && config.allow_vision_requests {
@@ -262,42 +353,191 @@ impl Pipeline {
             creator_hint: reel.creator.clone(),
             image_jpeg: image,
         };
-        let extraction = self.extract_reel(&reel, &input, &config).await?;
+        let extraction = match self.extract_reel(&reel, &input, &config).await {
+            Ok(e) => e,
+            Err(err) => {
+                let msg = match &err { Stop::Waiting(m) | Stop::Failed(m) => m.clone() };
+                stage("ai", "failed", Some(msg.chars().take(160).collect()));
+                stage("places", "skipped", None);
+                return Err(err);
+            }
+        };
+        let after = self.db.reel(id).ok().flatten();
+        stage("ai", "done", Some(format!("{} place(s) · {} text lines{}{}", extraction.all_places().len(), input.lines.len(),
+            if input.image_jpeg.is_some() { " · 1 image" } else { "" },
+            after.map(|r| format!(" · ${:.5}", r.ai_cost)).unwrap_or_default())));
 
-        // An imported Reel was saved on purpose: treat it as travel unless the AI clearly disagrees.
-        let travel = extraction.is_travel_related || !extraction.all_places().is_empty();
-        let classification = if travel { Classification::Travel } else { Classification::NotTravel };
-        if !travel {
+        // An imported Reel was saved on purpose: travel unless the AI clearly disagrees.
+        if !(extraction.is_travel_related || !extraction.all_places().is_empty()) {
+            stage("places", "skipped", Some("Not travel-related".into()));
             self.db.finish_reel(id, ProcessingStatus::NotTravel, extraction.reason.as_deref()).map_err(fail)?;
             return Ok(ProcessingStatus::NotTravel);
         }
-        let _ = classification;
 
-        // 5. Resolve each place independently and merge with existing places.
+        // 8. Resolve each place independently and merge with existing places.
         self.db.set_reel_status(id, ProcessingStatus::ResolvingPlaces, Some("Finding places")).map_err(fail)?;
-        self.notify();
+        stage("places", "running", None);
         let user_links = self.db.user_reel_links(id).map_err(fail)?;
         let user_names: Vec<String> = user_links.iter().map(|(_, n)| n.clone()).collect();
         let mut linked: Vec<(String, bool)> = user_links.iter().map(|(p, _)| (p.clone(), false)).collect();
-        linked.extend(self.resolve_places(Evidence::Reel(&reel), &extraction, &[], &line_sources, &user_names, &config).await?);
+        match self.resolve_places(Evidence::Reel(&reel), &extraction, &[], &line_sources, &user_names, &config).await {
+            Ok(l) => linked.extend(l),
+            Err(err) => {
+                let msg = match &err { Stop::Waiting(m) | Stop::Failed(m) => m.clone() };
+                stage("places", "failed", Some(msg));
+                return Err(err);
+            }
+        }
+        let reviews = self.db.reviews_for_reel(id).map_err(fail)?.iter().filter(|r| !r.is_resolved).count();
+        let r = self.db.reel(id).ok().flatten();
+        stage("places", "done", Some(format!("{} on the map{}",
+            r.as_ref().map(|r| r.places_auto_resolved).unwrap_or(0),
+            if reviews > 0 { format!(" · {reviews} to review") } else { String::new() })));
 
-        // 6. A clean key frame becomes a place photo when it's clear which place it shows.
         if let Err(e) = self.reel_photo(&reel, &linked, &config).await {
             log::warn!(target: "images", "reel photo extraction failed: {e}");
         }
 
-        let open = self.db.reviews_for_reel(id).map_err(fail)?.iter().any(|r| !r.is_resolved);
-        let (status, detail) = if open {
+        let (status, detail) = if reviews > 0 {
             (ProcessingStatus::NeedsReview, None)
         } else if media.is_none() && linked.is_empty() {
             (ProcessingStatus::NeedsMedia, Some("Only the caption was available. Import the video from Photos for more."))
         } else if media.is_none() {
             (ProcessingStatus::Complete, Some("From the caption only — import the video from Photos for more."))
         } else {
-            (ProcessingStatus::Complete, if notes.is_empty() { None } else { Some(notes[0].as_str()) })
+            (ProcessingStatus::Complete, None)
         };
         self.db.finish_reel(id, status, detail).map_err(fail)?;
         Ok(status)
+    }
+
+    /// Audio branch: save the voice track, then transcribe it (Auto language or the chosen one).
+    async fn reel_audio(&self, id: &str, video: &std::path::Path, dir: &std::path::Path, requested: &str, hint: &str,
+                        stage: &(dyn Fn(&str, &str, Option<String>) + Sync)) -> Vec<TranscriptSegment> {
+        stage("audio", "running", None);
+        let audio = match self.media.extract_audio(video, &dir.join("audio.m4a")).await {
+            Ok((Some(path), duration)) => {
+                let source = self.db.reel(id).ok().flatten().and_then(|r| r.media_source).unwrap_or_else(|| "photos".into());
+                let _ = self.db.set_reel_media(id, &video.to_string_lossy(), &source, Some(duration));
+                stage("audio", "done", Some(format!("{duration:.0} s of audio saved")));
+                path
+            }
+            Ok((None, _)) => {
+                stage("audio", "skipped", Some("The video has no audio track".into()));
+                stage("transcript", "skipped", Some("No audio".into()));
+                return Vec::new();
+            }
+            Err(e) => {
+                stage("audio", "failed", Some(e.to_string().chars().take(160).collect()));
+                stage("transcript", "skipped", Some("No audio".into()));
+                return Vec::new();
+            }
+        };
+
+        stage("transcript", "running", None);
+        let t = Instant::now();
+        let result = self.transcribe_best(&audio, requested, hint).await;
+        self.time("reels.transcribe", t);
+        match result {
+            Ok((tr, tried)) => {
+                let transcript = group_words(&tr.words);
+                let label = format!("{}{}", tr.locale, if tr.on_device { ", on-device" } else { ", Apple server" });
+                // Sung lyrics come back with low confidence (measured ~60% vs ~97% for speech): keep them
+                // visible but leave them out of the AI input.
+                let music = !tr.words.is_empty() && tr.confidence() < MIN_SPEECH_CONFIDENCE;
+                let _ = self.db.set_reel_transcript(id, Some(&audio.to_string_lossy()), &transcript, Some(&label));
+                let _ = self.db.set_transcript_confidence(id, (!tr.words.is_empty()).then(|| tr.confidence()));
+                let detail = if transcript.is_empty() {
+                    format!("No speech detected (tried {})", tried.join(", "))
+                } else if music {
+                    format!("{} lines · likely music or lyrics (confidence {:.0}%) — not used for places", transcript.len(), tr.confidence() * 100.0)
+                } else {
+                    format!("{} lines · {} · confidence {:.0}%{}", transcript.len(), label, tr.confidence() * 100.0,
+                            if tried.len() > 1 { format!(" · tried {}", tried.join(", ")) } else { String::new() })
+                };
+                stage("transcript", "done", Some(detail));
+                if music { Vec::new() } else { transcript }
+            }
+            Err(e) => {
+                let _ = self.db.set_reel_transcript(id, Some(&audio.to_string_lossy()), &[], None);
+                stage("transcript", "failed", Some(e.to_string().chars().take(160).collect()));
+                Vec::new()
+            }
+        }
+    }
+
+    /// Visual branch: a few distinct key snapshots, read with Vision OCR concurrently (never every frame).
+    async fn reel_frames(&self, id: &str, video: &std::path::Path, dir: &std::path::Path, max_frames: u32,
+                         stage: &(dyn Fn(&str, &str, Option<String>) + Sync)) -> Vec<(f64, Vec<String>)> {
+        stage("keyframes", "running", None);
+        let t = Instant::now();
+        let frames_dir = dir.join("frames");
+        let _ = std::fs::remove_dir_all(&frames_dir);
+        let frames = match self.media.keyframes(video, &frames_dir, max_frames).await {
+            Ok((_, frames)) => {
+                stage("keyframes", "done", Some(format!("{} key snapshots", frames.len())));
+                frames
+            }
+            Err(e) => {
+                stage("keyframes", "failed", Some(e.to_string().chars().take(160).collect()));
+                stage("ocr", "skipped", Some("No key snapshots".into()));
+                return Vec::new();
+            }
+        };
+
+        stage("ocr", "running", None);
+        let results = futures::future::join_all(frames.iter().map(|f| self.ocr.recognize(std::path::Path::new(&f.path)))).await;
+        let (mut rows, mut out, mut errors, mut lines) = (Vec::new(), Vec::new(), 0, 0);
+        for (f, result) in frames.iter().zip(results) {
+            let blocks = result.unwrap_or_else(|_| { errors += 1; vec![] });
+            let ordered = super::reading_order(&blocks);
+            let texts: Vec<String> = ordered.iter().map(|b| b.text.clone()).collect();
+            lines += texts.len();
+            let blocks_json = serde_json::to_string(&ordered.iter().map(|b| serde_json::json!({
+                "text": b.text, "confidence": b.confidence, "x": b.x, "y": b.y, "width": b.width, "height": b.height
+            })).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
+            rows.push((f.time_sec, f.path.clone(), texts.join("\n"), blocks_json));
+            out.push((f.time_sec, texts));
+        }
+        let _ = self.db.replace_keyframes(id, &rows);
+        if !rows.is_empty() && errors == rows.len() {
+            stage("ocr", "failed", Some("Text recognition failed on every frame".into()));
+        } else {
+            stage("ocr", "done", Some(format!("{lines} lines of on-screen text")));
+        }
+        self.time("reels.keyframes", t);
+        out
+    }
+
+    /// Transcribes with the requested locale, or — for "auto" — tries the likely locales (from
+    /// caption/on-screen language hints, then English) and keeps the most confident transcript.
+    async fn transcribe_best(&self, audio: &std::path::Path, requested: &str, hint_text: &str) -> Result<(Transcription, Vec<String>)> {
+        let auto = requested.eq_ignore_ascii_case("auto");
+        let supported = self.media.speech_locales().await.unwrap_or_default();
+        let hints = if auto && !hint_text.trim().is_empty() { self.media.detect_language(hint_text).await.unwrap_or_default() } else { vec![] };
+        let candidates = candidate_locales(requested, &hints, &supported);
+        let mut best: Option<Transcription> = None;
+        let mut tried = Vec::new();
+        let mut last_error = None;
+        for locale in candidates.iter().take(3) {
+            tried.push(locale.clone());
+            match self.media.transcribe(audio, locale).await {
+                Ok(tr) => {
+                    let good = tr.words.len() >= 3 && tr.confidence() >= 0.6;
+                    if best.as_ref().is_none_or(|b| transcript_score(&tr) > transcript_score(b)) {
+                        best = Some(tr);
+                    }
+                    if good || !auto {
+                        break;
+                    }
+                }
+                Err(e) => last_error = Some(e),
+            }
+        }
+        match best {
+            Some(b) => Ok((b, tried)),
+            None => Err(last_error.unwrap_or_else(|| anyhow!("No speech recognition language available"))),
+        }
     }
 
     async fn extract_reel(&self, reel: &ReelRecord, input: &ScreenshotAiInput, config: &AppConfig) -> Result<TravelExtraction, Stop> {
@@ -314,16 +554,9 @@ impl Pipeline {
             return Err(Stop::Waiting(AiError::DailyLimitReached.to_string()));
         }
         let t = Instant::now();
-        let mut outcome = ai.extract_travel_information(input, config.use_thinking_by_default).await;
-        // Level 3 only for genuinely ambiguous results.
-        if let Ok(r) = &outcome {
-            if !config.use_thinking_by_default && config.allow_thinking_escalation && r.value.is_ambiguous() {
-                self.db.log_ai_usage(None, "reel", &r.usage, true, AI_PROMPT_VERSION);
-                if let Ok(better) = ai.extract_travel_information(input, true).await {
-                    outcome = Ok(better);
-                }
-            }
-        }
+        // No thinking escalation for Reels: caption + transcript + on-screen text already give rich context, and
+        // ambiguous names are settled by map scoring and the Review inbox (measured: +23 s, ~6x cost, same result).
+        let outcome = ai.extract_travel_information(input, config.use_thinking_by_default).await;
         self.time("ai.reel", t);
         match outcome {
             Ok(r) => {
@@ -395,7 +628,7 @@ mod tests {
     use super::*;
 
     fn w(text: &str, start: f64, duration: f64) -> WordTiming {
-        WordTiming { text: text.into(), start, duration }
+        WordTiming { text: text.into(), start, duration, confidence: 0.9 }
     }
 
     #[test]
@@ -429,5 +662,40 @@ mod tests {
         let on_screen: Vec<&String> = lines.iter().filter(|l| l.starts_with("on-screen")).collect();
         assert_eq!(on_screen, vec!["on-screen 00:09: ¥500 entry"]);
         assert_eq!(sources[lines.len() - 1].time_sec, Some(9.0));
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+
+    fn loc(id: &str, on_device: bool) -> SpeechLocale {
+        SpeechLocale { id: id.into(), name: id.into(), on_device, engine: String::new() }
+    }
+
+    #[test]
+    fn auto_uses_hints_then_english() {
+        let supported = vec![loc("en-US", true), loc("ja-JP", true), loc("zh-CN", true), loc("ta-IN", true), loc("ko-KR", true)];
+        let hints = vec![("ja".to_string(), 0.9), ("zh-Hans".to_string(), 0.05)];
+        assert_eq!(candidate_locales("auto", &hints, &supported), vec!["ja-JP", "en-US"]);
+        assert_eq!(candidate_locales("auto", &[("ta".into(), 0.9)], &supported), vec!["ta-IN", "en-US"]);
+        // Real case: a romanised English caption was detected as Indonesian with modest confidence — ignore it.
+        assert_eq!(candidate_locales("auto", &[("id".into(), 0.6)], &supported), vec!["en-US"]);
+        assert_eq!(candidate_locales("auto", &[], &supported), vec!["en-US"]);
+    }
+
+    #[test]
+    fn unsupported_languages_are_skipped_in_auto_but_kept_when_chosen() {
+        let supported = vec![loc("en-US", true), loc("en-AU", true)];
+        // Sinhala isn't supported by Apple speech on this Mac: auto falls back to English…
+        assert_eq!(candidate_locales("auto", &[("si".into(), 0.95)], &supported), vec!["en-US"]);
+        // …but an explicit choice is passed through so the user gets a clear "not supported" message.
+        assert_eq!(candidate_locales("si-LK", &[], &supported), vec!["si-LK"]);
+    }
+
+    #[test]
+    fn same_language_fallback_prefers_on_device() {
+        let supported = vec![loc("zh-TW", false), loc("zh-HK", true)];
+        assert_eq!(locale_for_language("zh-Hans", &supported).as_deref(), Some("zh-HK"));
     }
 }

@@ -75,7 +75,7 @@ struct MockMaps {
 
 #[async_trait]
 impl PlaceSearchProvider for MockMaps {
-    async fn search(&self, query: &str) -> Result<Vec<PlaceCandidate>, PlaceError> {
+    async fn search(&self, query: &str, _near: Option<&str>) -> Result<Vec<PlaceCandidate>, PlaceError> {
         let q = crate::text::normalize(query);
         Ok(self.results.iter().filter(|(k, _)| q.starts_with(&crate::text::normalize(k))).flat_map(|(_, v)| v.clone()).collect())
     }
@@ -162,7 +162,7 @@ impl Harness {
         let dir = std::env::temp_dir().join(format!("tsm-test-{}", uuid::Uuid::new_v4()));
         let ocr = Arc::new(MockOcr { texts: Mutex::new(HashMap::new()), calls: AtomicUsize::new(0) });
         let ai = Arc::new(MockAi { responses: Mutex::new(HashMap::new()), calls: AtomicUsize::new(0) });
-        let places = Arc::new(PlaceService::new(Arc::new(MockMaps { results: maps })));
+        let places = Arc::new(PlaceService::new(Arc::new(MockMaps { results: maps })).with_min_interval(std::time::Duration::ZERO));
         let media = Arc::new(MockMedia { words: Mutex::new(vec![]), frames: Mutex::new(vec![]) });
         let fetcher = Arc::new(MockFetcher { caption: Mutex::new(None), has_video: AtomicUsize::new(1) });
         let pipeline = Arc::new(Pipeline::new(
@@ -409,8 +409,8 @@ impl MediaService for MockMedia {
     }
     async fn transcribe(&self, _: &Path, locale: &str) -> Result<Transcription> {
         let words = self.words.lock().unwrap().iter()
-            .map(|(t, s)| WordTiming { text: t.clone(), start: *s, duration: 0.3 }).collect();
-        Ok(Transcription { words, on_device: true, locale: locale.into() })
+            .map(|(t, s)| WordTiming { text: t.clone(), start: *s, duration: 0.3, confidence: 0.9 }).collect();
+        Ok(Transcription { words, on_device: true, locale: locale.into(), engine: "mock".into() })
     }
     async fn keyframes(&self, _: &Path, out_dir: &Path, _: u32) -> Result<(f64, Vec<FrameInfo>)> {
         std::fs::create_dir_all(out_dir)?;
@@ -423,6 +423,10 @@ impl MediaService for MockMedia {
         Ok((20.0, out))
     }
     async fn list_videos(&self, _: u32) -> Result<Vec<PhotoVideo>> { Ok(vec![]) }
+    async fn speech_locales(&self) -> Result<Vec<SpeechLocale>> {
+        Ok(vec![SpeechLocale { id: "en-US".into(), name: "English".into(), on_device: true, engine: "mock".into() }])
+    }
+    async fn detect_language(&self, _: &str) -> Result<Vec<(String, f64)>> { Ok(vec![("en".into(), 0.9)]) }
     async fn export_video(&self, _: &str, out: &Path) -> Result<Option<String>> {
         std::fs::create_dir_all(out.parent().unwrap())?;
         std::fs::write(out, b"mp4")?;
@@ -593,7 +597,7 @@ async fn live_screenshot_end_to_end() {
     let image = PathBuf::from(std::env::var("TSM_LIVE_IMAGE").expect("set TSM_LIVE_IMAGE"));
     let bridge = Arc::new(NativeBridge::new(NativeBridge::locate_binary()));
     let config = AppConfig::default();
-    let (key, _) = crate::config::resolve_api_key(None);
+    let (key, _) = crate::config::resolve_api_key();
     let ai = Arc::new(crate::services::ai::deepseek::DeepSeekTravelAIService::new(config.clone(), key));
     let db = Arc::new(Database::open_in_memory().unwrap());
     let dir = std::env::temp_dir().join(format!("tsm-live-{}", uuid::Uuid::new_v4()));
@@ -618,4 +622,132 @@ async fn live_screenshot_end_to_end() {
         println!("review: {} — {}", r.kind, r.message);
     }
     assert!(matches!(status, ProcessingStatus::Complete | ProcessingStatus::NeedsReview));
+}
+
+/// Real-data validation: random sample of the user's actual screenshots through the full pipeline.
+///   TSM_LIVE_COUNT=100 TSM_LIVE_DB=/tmp/x.sqlite cargo test live_photos -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn live_photos_validation() {
+    for f in ["../.env.local", ".env.local"] {
+        let _ = dotenvy::from_filename(f);
+    }
+    let count: usize = std::env::var("TSM_LIVE_COUNT").ok().and_then(|c| c.parse().ok()).unwrap_or(10);
+    let db_path = PathBuf::from(std::env::var("TSM_LIVE_DB").expect("set TSM_LIVE_DB"));
+    let data_dir = db_path.parent().unwrap().join("data");
+    let bridge = Arc::new(NativeBridge::new(NativeBridge::locate_binary()));
+    let mut config = AppConfig::default();
+    config.max_concurrent_screenshots = 3;
+    let (key, _) = crate::config::resolve_api_key();
+    let ai = Arc::new(crate::services::ai::deepseek::DeepSeekTravelAIService::new(config.clone(), key));
+    let db = Arc::new(Database::open(&db_path).unwrap());
+    let pipeline = Arc::new(Pipeline::new(db.clone(), bridge.clone(), bridge.clone(), bridge.clone(),
+        Arc::new(PlaceService::new(bridge.clone())), bridge.clone(), Arc::new(crate::services::reels::InstagramFetcher::default()),
+        ai, config, data_dir));
+    let queue = Arc::new(crate::pipeline::queue::ProcessingQueue::new(pipeline.clone(), Arc::new(|s: &crate::pipeline::queue::QueueSnapshot| {
+        if s.processed % 10 == 0 && s.processed > 0 { eprintln!("  … {}/{} processed", s.processed, s.total); }
+    })));
+    let started = std::time::Instant::now();
+    let run_id = if std::env::var("TSM_LIVE_REPROCESS").is_ok() {
+        // Re-run the same screenshots (OCR is reused) to compare before/after a fix.
+        let ids: Vec<String> = db.with(|c| { let mut s = c.prepare("SELECT id FROM screenshots")?; let r = s.query_map([], |r| r.get(0))?; r.collect() }).unwrap();
+        db.mark_for_reprocess("all", &[]).unwrap();
+        let run = db.create_run("validation", ids.len() as i64, "rerun").unwrap();
+        db.set_run_screenshots(&run, &ids).unwrap();
+        queue.clone().run(crate::pipeline::queue::RunMode::Retry).await;
+        db.finish_run(&run).unwrap();
+        run
+    } else {
+        queue.clone().run(crate::pipeline::queue::RunMode::Validation { count, random: true }).await.expect("run id")
+    };
+    let report = db.run_report(&run_id).unwrap().unwrap();
+    println!("\n=== VALIDATION: {} screenshots in {:.0}s ===", report.total, started.elapsed().as_secs_f64());
+    println!("travel {} | not travel {} (skipped locally {}) | needs review {} | failed {} | waiting {}",
+        report.travel, report.not_travel, report.skipped_locally, report.needs_review, report.failed, report.waiting);
+    println!("AI requests {} | places found {} | extracted {} | auto-resolved {} ({:.0}%)",
+        report.ai_requests, report.places_found, report.places_extracted, report.places_auto_resolved, report.resolution_rate * 100.0);
+    println!("avg OCR {:.0} ms | avg AI {:.0} ms | avg total {:.0} ms | cost ${:.4} (${:.5}/travel) | tokens {} in / {} out",
+        report.avg_ocr_ms, report.avg_ai_ms, report.avg_total_ms, report.total_cost, report.cost_per_travel_screenshot, report.input_tokens, report.output_tokens);
+    for r in &report.rows {
+        let shot = db.screenshot(&r.screenshot_id).unwrap().unwrap();
+        let snippet: String = shot.ocr_full_text.replace('\n', " / ").chars().take(110).collect();
+        println!("[{:<11}] L{} p={:.2} local={:.2} {:<10} places={:?} {} | {}", r.status, r.escalation_level, r.travel_confidence,
+            shot.local_travel_score, r.source_type, r.places, r.status_detail.clone().unwrap_or_default(), snippet);
+    }
+    for rv in db.open_reviews().unwrap() {
+        println!("REVIEW {}: {} | candidates: {:?}", rv.kind, rv.message, rv.candidates.iter().map(|c| format!("{} ({})", c.name, c.country.clone().unwrap_or_default())).collect::<Vec<_>>());
+    }
+}
+
+/// Real Instagram Reels through the full Reel pipeline.
+///   TSM_LIVE_REELS=urls.txt TSM_LIVE_DB=/tmp/r.sqlite cargo test live_reels -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn live_reels_validation() {
+    for f in ["../.env.local", ".env.local"] {
+        let _ = dotenvy::from_filename(f);
+    }
+    let urls: Vec<String> = std::fs::read_to_string(std::env::var("TSM_LIVE_REELS").expect("set TSM_LIVE_REELS")).unwrap()
+        .lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(String::from).collect();
+    let db_path = PathBuf::from(std::env::var("TSM_LIVE_DB").expect("set TSM_LIVE_DB"));
+    let bridge = Arc::new(NativeBridge::new(NativeBridge::locate_binary()));
+    let config = AppConfig::default();
+    let (key, _) = crate::config::resolve_api_key();
+    let ai = Arc::new(crate::services::ai::deepseek::DeepSeekTravelAIService::new(config.clone(), key));
+    let db = Arc::new(Database::open(&db_path).unwrap());
+    let pipeline = Pipeline::new(db.clone(), bridge.clone(), bridge.clone(), bridge.clone(),
+        Arc::new(PlaceService::new(bridge.clone())), bridge.clone(), Arc::new(crate::services::reels::InstagramFetcher::default()),
+        ai, config, db_path.parent().unwrap().join("data"));
+
+    let (mut total_cost, mut places_total, mut ok) = (0.0, 0, 0);
+    for url in &urls {
+        let started = std::time::Instant::now();
+        let (id, _) = pipeline.register_reel(url).unwrap();
+        let status = pipeline.process_reel(&id).await;
+        let reel = db.reel(&id).unwrap().unwrap();
+        total_cost += reel.ai_cost;
+        println!("\n### {url}\nstatus {status:?} in {:.0}s · {} · cost ${:.5} · {:?}", started.elapsed().as_secs_f64(),
+            reel.creator.clone().unwrap_or_default(), reel.ai_cost, reel.status_detail);
+        for s in crate::pipeline::reels::STAGES {
+            let st = &reel.stages[s];
+            println!("  {:<10} {:<8} {}", s, st["status"].as_str().unwrap_or("-"), st["detail"].as_str().unwrap_or(""));
+        }
+        for seg in reel.transcript.iter().take(3) {
+            println!("  🎙 {:>5.1}s {}", seg.start, seg.text.chars().take(100).collect::<String>());
+        }
+        let places = db.places_for_reel(&id).unwrap();
+        places_total += places.len();
+        if matches!(status, ProcessingStatus::Complete | ProcessingStatus::NeedsReview) { ok += 1; }
+        for p in &places {
+            let facts = db.facts_for_place(&p.id).unwrap().into_iter().filter(|f| f.reel_id.as_deref() == Some(&id)).collect::<Vec<_>>();
+            println!("  📍 {} — {} [{}] facts: {}", p.canonical_name, p.subtitle(), p.verification,
+                facts.iter().map(|f| format!("{}@{}:{}", f.fact_type, f.source_kind, f.source_time_sec.map(|t| format!("{t:.0}s")).unwrap_or_default())).collect::<Vec<_>>().join(", "));
+        }
+        for r in db.reviews_for_reel(&id).unwrap() {
+            println!("  ❓ {}: {}", r.kind, r.message);
+        }
+    }
+    println!("\n=== REELS: {ok}/{} usable · {places_total} place links · total AI cost ${total_cost:.4} ===", urls.len());
+}
+
+#[tokio::test]
+async fn choosing_a_place_in_review_keeps_reel_timestamps() {
+    let h = Harness::new();
+    h.reel_words(&[("We swam at the Blue Lagoon.", 3.0), ("Book tickets a week ahead.", 8.0)]);
+    h.ai.responses.lock().unwrap().insert("audio 00:03: We swam at the Blue Lagoon.".into(), AiBehaviour::Json(
+        r#"{"is_travel_related": true, "travel_confidence": 0.95, "places": [{"display_name": "Blue Lagoon", "ambiguous": true,
+            "facts": [{"type": "reservation", "text": "Book tickets a week ahead", "source_lines": [1]}]}]}"#.into()));
+    let (id, _) = h.pipeline.register_reel("https://www.instagram.com/reel/BLUE1/").unwrap();
+    assert_eq!(h.pipeline.process_reel(&id).await, ProcessingStatus::NeedsReview);
+
+    let review = h.db.reviews_for_reel(&id).unwrap().into_iter().find(|r| r.kind == ReviewKind::PlaceResolution).unwrap();
+    let iceland = review.candidates.iter().find(|c| c.country_code.as_deref() == Some("IS")).unwrap().clone();
+    h.pipeline.resolve_review(&review.id, "choose", Some(iceland)).await.unwrap();
+
+    let places = h.db.places_for_reel(&id).unwrap();
+    assert_eq!(places.len(), 1);
+    assert_eq!(places[0].country_code.as_deref(), Some("IS"));
+    let fact = &h.db.facts_for_place(&places[0].id).unwrap()[0];
+    assert_eq!((fact.source_kind.as_str(), fact.source_time_sec), ("audio", Some(8.0)), "provenance survives the correction");
+    assert_eq!(h.db.reel(&id).unwrap().unwrap().status, ProcessingStatus::Complete);
 }

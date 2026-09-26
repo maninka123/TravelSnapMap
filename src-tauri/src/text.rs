@@ -52,7 +52,10 @@ pub fn name_similarity(a: &str, b: &str) -> f64 {
     }
     if ca.contains(&cb) || cb.contains(&ca) {
         let (la, lb) = (ca.chars().count() as f64, cb.chars().count() as f64);
-        return 0.6 + 0.3 * la.min(lb) / la.max(lb);
+        let ratio = 0.6 + 0.3 * la.min(lb) / la.max(lb);
+        // A distinctive name fully inside an official one ("Wangxian Valley" in
+        // "Wangxian Valley Scenic Area") is a strong match.
+        return if la.min(lb) >= 8.0 { ratio.max(0.8) } else { ratio };
     }
     let (ta, tb) = (tokens(a), tokens(b));
     if ta.is_empty() || tb.is_empty() {
@@ -160,5 +163,33 @@ mod tests {
         // Kyoto Station → Fushimi Inari ≈ 2.7 km
         let d = distance_m(34.9858, 135.7588, 34.9671, 135.7727);
         assert!((2_000.0..3_500.0).contains(&d));
+    }
+}
+
+const CONTINENTS: &[&str] = &[
+    "europe", "asia", "africa", "north america", "south america", "oceania", "antarctica", "australasia",
+    "southeast asia", "south east asia", "middle east", "scandinavia", "caribbean", "the world", "world",
+];
+
+/// English country name for an ISO code (Maps sometimes returns a localised name such as 日本).
+pub fn country_name(code: &str) -> Option<&'static str> {
+    COUNTRIES.iter().find(|(c, _)| c.eq_ignore_ascii_case(code)).map(|(_, n)| match *n { "China mainland" => "China", other => other })
+}
+
+/// Countries and continents are context, never places to pin.
+pub fn is_country_or_continent(name: &str) -> bool {
+    let n = normalize(name);
+    CONTINENTS.contains(&n.as_str()) || (n.len() > 2 && country_index().contains_key(&n))
+}
+
+#[cfg(test)]
+mod region_tests {
+    #[test]
+    fn countries_and_continents() {
+        assert!(super::is_country_or_continent("Europe"));
+        assert!(super::is_country_or_continent("South Korea"));
+        assert!(super::is_country_or_continent("China"));
+        assert!(!super::is_country_or_continent("Lake Bled"));
+        assert!(!super::is_country_or_continent("Kyoto"));
     }
 }

@@ -254,3 +254,46 @@ impl Database {
         Ok(())
     }
 }
+
+impl Database {
+    pub fn reset_reel_stages(&self, id: &str) -> Result<()> {
+        self.with(|c| c.execute("UPDATE reels SET stages = '{}' WHERE id = ?1", [id]))?;
+        Ok(())
+    }
+
+    /// status: pending | running | done | skipped | failed
+    pub fn set_reel_stage(&self, id: &str, stage: &str, status: &str, detail: Option<&str>) -> Result<()> {
+        self.with(|c| c.execute(
+            "UPDATE reels SET stages = json_set(COALESCE(NULLIF(stages, ''), '{}'), '$.' || ?2, json_object('status', ?3, 'detail', ?4)) WHERE id = ?1",
+            params![id, stage, status, detail],
+        ))?;
+        Ok(())
+    }
+
+    /// `None` = follow the app setting; `Some("auto")` or a locale such as `ja-JP`.
+    pub fn set_transcript_override(&self, id: &str, locale: Option<&str>) -> Result<()> {
+        self.with(|c| c.execute("UPDATE reels SET transcript_locale_override = ?2 WHERE id = ?1", params![id, locale]))?;
+        Ok(())
+    }
+
+    pub fn set_transcript_confidence(&self, id: &str, confidence: Option<f64>) -> Result<()> {
+        self.with(|c| c.execute("UPDATE reels SET transcript_confidence = ?2 WHERE id = ?1", params![id, confidence]))?;
+        Ok(())
+    }
+}
+
+impl Database {
+    /// Moves one source's facts and photos from a provisional place to the place the user chose,
+    /// keeping their provenance (OCR blocks, Reel timestamps).
+    pub fn move_source_evidence(&self, from_place: &str, to_place: &str, screenshot_id: Option<&str>, reel_id: Option<&str>) -> Result<()> {
+        self.transaction(|tx| {
+            for table in ["travel_facts", "place_images"] {
+                tx.execute(
+                    &format!("UPDATE {table} SET place_id = ?2 WHERE place_id = ?1 AND ((?3 IS NOT NULL AND screenshot_id = ?3) OR (?4 IS NOT NULL AND reel_id = ?4))"),
+                    params![from_place, to_place, screenshot_id, reel_id],
+                )?;
+            }
+            Ok(())
+        })
+    }
+}

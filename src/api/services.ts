@@ -2,7 +2,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
-  AppConfig, Diagnostics, LibraryItem, PhotoVideo, ReelDetail, Reel, Overview, PlaceCandidate, PlaceDetail, PlaceFilter, Place, QueueSnapshot, Rect,
+  AppConfig, Diagnostics, LibraryItem, PhotoVideo, ReelDetail, Reel, RunMode, RunRecord, RunReport, ScanPreview, SpeechLocale, Overview, PlaceCandidate, PlaceDetail, PlaceFilter, Place, QueueSnapshot, Rect,
   ReviewEntry, Screenshot, ScreenshotDetail, ScreenshotView, Settings, Trip, TripEntry,
 } from "./types";
 
@@ -28,7 +28,13 @@ export const PhotoLibraryService = {
 };
 
 export const ProcessingService = {
-  start: (discover: boolean, limit?: number) => invoke<void>("start_processing", { discover, limit: limit ?? null }),
+  /** Scan New Screenshots (Photos + folders), a validation run, retry, or one folder. */
+  start: (mode: RunMode) => invoke<void>("start_processing", { mode }),
+  scanPreview: () => invoke<ScanPreview>("scan_preview"),
+  runs: () => invoke<RunRecord[]>("list_runs"),
+  runReport: (id: string) => invoke<RunReport | null>("run_report", { id }),
+  addFolder: (path: string) => invoke<void>("add_screenshot_folder", { path }),
+  removeFolder: (path: string) => invoke<void>("remove_screenshot_folder", { path }),
   pause: () => invoke<void>("pause_processing"),
   resume: () => invoke<void>("resume_processing"),
   cancel: () => invoke<void>("cancel_processing"),
@@ -104,6 +110,9 @@ export const ReelService = {
   attachPhotoVideo: (reelId: string | null, assetId: string) => invoke<string>("import_reel_video_from_photos", { reelId, assetId }),
   action: (id: string, action: "reprocess" | "ignore" | "delete") => invoke<void>("reel_action", { id, action }),
   toolStatus: () => invoke<{ ytDlp: string | null }>("reel_tool_status"),
+  /** Re-transcribe with a language ("auto" to detect again); the extraction is updated afterwards. */
+  retranscribe: (id: string, locale: string) => invoke<void>("retranscribe_reel", { id, locale }),
+  speechLocales: () => invoke<SpeechLocale[]>("speech_locales"),
 };
 
 export const LibraryService = {

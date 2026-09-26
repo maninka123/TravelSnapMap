@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { AppService, PhotoLibraryService, ProcessingService, ReelService, SettingsService } from "../../api/services";
-import type { AppConfig } from "../../api/types";
-import { ErrorNote } from "../../components/common";
+import type { AppConfig, RunReport } from "../../api/types";
+import { ErrorNote, Modal } from "../../components/common";
+import { RunReportView } from "../../components/ScanControls";
+import { formatDate } from "../../lib/labels";
 import { useAction, useLoad } from "../../lib/nav";
 
 export function SettingsView() {
@@ -9,6 +11,9 @@ export function SettingsView() {
   const { data: diag } = useLoad(() => AppService.diagnostics(), []);
   const { data: permission } = useLoad(() => PhotoLibraryService.permissionStatus(), []);
   const { data: tools } = useLoad(() => ReelService.toolStatus(), []);
+  const { data: locales = [] } = useLoad(() => ReelService.speechLocales(), []);
+  const { data: runs = [] } = useLoad(() => ProcessingService.runs(), []);
+  const [runReport, setRunReport] = useState<RunReport>();
   const [config, setConfig] = useState<AppConfig>();
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
@@ -56,7 +61,7 @@ export function SettingsView() {
             <span>API key</span><span>{settings.hasApiKey ? `✓ ${settings.apiKeySource}` : "Not configured"}</span>
           </div>
           <form className="row" onSubmit={async (e) => { e.preventDefault(); await action.run(() => SettingsService.saveApiKey(key || null)); setKey(""); reload(); }}>
-            <input className="grow" type="password" placeholder="Paste a key to store it locally (optional)" value={key} onChange={(e) => setKey(e.target.value)} />
+            <input className="grow" type="password" placeholder="Paste a key to store it in the macOS Keychain (optional)" value={key} onChange={(e) => setKey(e.target.value)} />
             <button className="btn">Save key</button>
           </form>
           <p className="muted small">Development: <code>DEEPSEEK_API_KEY</code> in <code>.env.local</code> is used first. Never commit keys.</p>
@@ -84,6 +89,14 @@ export function SettingsView() {
 
         <div className="card">
           <h3>Processing</h3>
+          <label className="check"><input type="checkbox" checked={config.autoProcessNewScreenshots} onChange={(e) => set("autoProcessNewScreenshots", e.target.checked)} />
+            <span><b>Automatically process new screenshots</b><br /><span className="muted small">When on, new screenshots are processed as soon as Photos reports them. Off: use “Scan New Screenshots”.</span></span></label>
+          <h4 style={{ margin: "8px 0" }}>Screenshot folders</h4>
+          {config.screenshotFolders.length === 0 && <p className="muted small">None. Use “Import Folder…” in Sources to add screenshots from any device.</p>}
+          {config.screenshotFolders.map((f) => (
+            <div key={f} className="candidate"><span className="small">📁 {f}</span>
+              <button className="btn small" onClick={async () => { await action.run(() => ProcessingService.removeFolder(f)); reload(); }}>Remove</button></div>
+          ))}
           <div className="field"><label>Screenshots processed in parallel</label>{num("maxConcurrentScreenshots", 1)}</div>
           <div className="row">
             <div className="field grow"><label>Only scan from year</label>{num("scanFromYear", 1)}</div>
@@ -104,8 +117,12 @@ export function SettingsView() {
           <div className="kv" style={{ marginBottom: 10 }}>
             <span>Video downloader</span><span>{tools?.ytDlp ? `✓ yt-dlp (${tools.ytDlp})` : "yt-dlp not found — caption only; use Import video from Photos"}</span>
           </div>
-          <div className="field"><label>Transcription language</label><input value={config.transcriptionLocale} onChange={(e) => set("transcriptionLocale", e.target.value)} />
-            <span className="hint">e.g. en-US, ja-JP, zh-CN. Speech recognition runs on your Mac.</span></div>
+          <div className="field"><label>Transcription language</label>
+            <select value={config.transcriptionLocale} onChange={(e) => set("transcriptionLocale", e.target.value)}>
+              <option value="auto">Auto language (detect from caption / on-screen text)</option>
+              {locales.map((l) => <option key={l.id} value={l.id}>{l.name}{l.onDevice ? "" : " (Apple server)"}</option>)}
+            </select>
+            <span className="hint">On-device where Apple supports it. Each Reel can be re-transcribed in another language.</span></div>
           <div className="field"><label>Key snapshots per Reel</label>{num("maxKeyframes", 1)}</div>
           <div className="field"><label>yt-dlp path (optional)</label><input value={config.ytDlpPath} onChange={(e) => set("ytDlpPath", e.target.value)} placeholder="auto-detect" /></div>
           <div className="field"><label>Use browser cookies (optional)</label>
@@ -123,6 +140,22 @@ export function SettingsView() {
           <span className="hint small muted">Check DeepSeek's pricing page and update these for accurate estimates.</span>
         </div>
       </div>
+
+      {runs.length > 0 && (
+        <>
+          <div className="section"><h3>Test runs &amp; scans</h3></div>
+          <div className="list">
+            {runs.map((r) => (
+              <div key={r.id} className="list-row" onClick={async () => setRunReport((await ProcessingService.runReport(r.id)) ?? undefined)}>
+                <div className="grow"><div className="strong">{r.kind === "validation" ? `Test run ·  ()` : r.kind === "scanFolder" ? "Folder scan" : "Scan New Screenshots"}</div>
+                  <div className="muted small">{formatDate(r.startedAt)} · {r.screenshotCount} screenshots{r.finishedAt ? "" : " · running"}</div></div>
+                <span className="muted small">View report →</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {runReport && <Modal title="Run report" onClose={() => setRunReport(undefined)} wide><RunReportView report={runReport} /></Modal>}
 
       {diag && (
         <>

@@ -46,3 +46,34 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] README (setup, architecture, privacy, cost controls)
 - [x] `.gitignore` (secrets, build output)
 - [x] Push to GitHub (github.com/maninka123/TravelSnapMap)
+
+## Milestone E — Reliability on real data
+- [x] Test mode: process 10 / 25 / 50 / 100 real screenshots (random or newest) with a results report
+- [x] "Scan New Screenshots": only PhotoKit IDs / file paths not already in the database
+- [x] Setting: automatically process new screenshots (default OFF)
+- [x] Import Folder: screenshots from any device (PNG/JPG/HEIC folders), same pipeline and "only new" logic
+- [x] Reel stages shown clearly (Caption → Video → Audio → Transcript → Keyframes → OCR → AI → Places); later stages continue if one fails
+- [x] Reel transcription: Auto language + manual re-transcribe (English, Japanese, Chinese, Korean, Sinhala, Tamil, …)
+- [x] Place cards polish (Warnings card, per-card sources, every fact keeps its source/timestamp)
+- [x] Security: DeepSeek key in macOS Keychain (migrated from SQLite); production CSP (dev keeps a relaxed one for hot reload)
+- [x] Fix: macOS killed the helper on permission requests in dev (TCC "responsible process") — helper now requests permissions itself
+- [x] UI restyled with the Apple design framework (apple-design skill installed permanently)
+- [x] Real test: 100 real screenshots (random sample) — 0 failures, 81% place auto-resolution, ~$0.011 per 100
+- [x] Real test: 15 real Instagram Reels — 0 failures, 14/15 usable (1 login-only → "import from Photos"), 42 places (39 verified), $0.0031 total
+- [x] Fix issues found in real testing (each one has a regression test):
+  - [x] Local filter missed real travel posts (e.g. Wangxian Valley TikTok, restaurant with street address) → recall improved
+  - [x] Countries/continents extracted as "places" → dropped
+  - [x] Apple Maps biased to your own location → searches centred on the place's city/region/country, alt-language names tried
+  - [x] Exact match rejected when Maps omitted the country; same-name place in another city accepted → fixed scoring
+  - [x] Model added text after JSON; long Reels cut off at the output limit → tolerant parsing + automatic larger retry
+  - [x] Review noise: "is this travel?" with nothing to map → low-confidence instead; near-identical screenshots share one AI result
+  - [x] Choosing a place in Review lost Reel timestamps / OCR provenance → facts are moved, not re-created
+  - [x] Re-processing added to old AI cost/latency → reset per run
+  - [x] Apple Maps throttling → 1.3 s spacing + backoff; auto-retry only parked items (never failed ones)
+  - [x] Instagram rate-limits → yt-dlp retries; DeepSeek hiccups retried, "offline" only when truly offline
+  - [x] Auto language picked wrong languages → only strong caption hints reorder candidates
+  - [x] Song lyrics used as "speech" → low-confidence transcripts kept but excluded from AI input
+  - [x] Thinking escalation on Reels (+23 s, ~6x cost, same result) → disabled for Reels
+- [x] Speed: one yt-dlp call, audio and keyframes in parallel, concurrent OCR, 2-pass keyframes (Reel ~42 s → ~20 s)
+- [x] Output tokens −33 % (short reason, no redundant quotes); cost ≈ $0.011 per 100 screenshots
+- [x] Production: error boundaries, log file, Keychain, strict CSP, per-stage timings

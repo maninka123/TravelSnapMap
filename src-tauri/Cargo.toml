@@ -1,6 +1,6 @@
 [package]
 name = "travelsnapmap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turns travel screenshots in Apple Photos into a personal travel map"
 edition = "2021"
 rust-version = "1.80"
@@ -31,4 +31,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 unicode-normalization = "0.1"
 dotenvy = "0.15"
 log = "0.4"
+tauri-plugin-dialog = "2"
+futures = "0.3"
+keyring = { version = "3", features = ["apple-native"] }
 env_logger = "0.11"

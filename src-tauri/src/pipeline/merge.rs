@@ -54,7 +54,9 @@ pub fn find_match(db: &Database, cand: &PlaceCandidate, extra_names: &[String]) 
 /// and are kept side by side (e.g. "sunrise" vs "sunset", ¥2,000 in 2024 vs ¥2,500 in 2026).
 pub fn is_duplicate_fact(existing: &[FactRecord], kind: TravelFactType, text: &str) -> bool {
     let norm = normalize(text);
-    existing.iter().any(|f| f.fact_type == kind && (normalize(&f.text) == norm || name_similarity(&f.text, text) >= 0.95))
+    // OCR of the same caption on several key frames gives near-identical text; 0.85 catches those while
+    // genuinely different advice ("sunrise" vs "sunset") stays well below it.
+    existing.iter().any(|f| f.fact_type == kind && (normalize(&f.text) == norm || name_similarity(&f.text, text) >= 0.85))
 }
 
 /// The evidence a place is being attached from.

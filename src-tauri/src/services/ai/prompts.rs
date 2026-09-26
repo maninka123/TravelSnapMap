@@ -15,11 +15,11 @@ pub fn extraction_system() -> String {
 Input: numbered lines — a screenshot's OCR text (may include app UI noise), or a Reel's timestamped audio transcript, caption and on-screen text — plus metadata, sometimes an image.
 Travel-related = useful for planning or remembering travel: places to visit/eat/stay, activities, transport, itineraries, travel advice.
 Reply with ONLY this JSON:
-{{"is_travel_related":bool,"travel_confidence":0-1 probability it is travel-related,"reason":str,"source_type":"{sources}","creator":str|null,
+{{"is_travel_related":bool,"travel_confidence":0-1 probability it is travel-related,"reason":"max 12 words","source_type":"{sources}","creator":str|null,
 "places":[{{"display_name":str,"alternative_names":[str],"city":str|null,"region":str|null,"country":str|null,
 "category":"{categories}","place_confidence":0-1,"ambiguous":bool,"search_query":str,"has_useful_photo":bool,
-"facts":[{{"type":"{facts}","text":str,"confidence":0-1,"source_quote":str|null,"source_lines":[int]}}]}}]}}
-Rules: use only what the screenshot supports; never invent places, prices, hours, addresses or coordinates; null when unknown; don't guess a country without evidence; list every distinct place the source recommends or is about (0..n), not whole countries; places mentioned only as context (a departure station, a mountain seen from the main place) go into the main place's facts, not the places list; keep contradictory advice as separate facts; keep meaning exact; creator only if visible (e.g. @handle); ambiguous=true if the name could match several real places; search_query = "name, city, country" using only known parts. No text outside the JSON."#,
+"facts":[{{"type":"{facts}","text":"short","source_lines":[int]}}]}}]}}
+Rules: use only what the screenshot supports; never invent places, prices, hours, addresses or coordinates; null when unknown; don't guess a country without evidence; list every distinct place the source recommends or is about (0..n), not whole countries; places mentioned only as context (a departure station, a mountain seen from the main place) go into the main place's facts, not the places list; facts = only practical travel info (timing, prices, hours, transport, booking, food, photo spots, warnings, tips), not personal stories; keep contradictory advice as separate facts; keep meaning exact; creator only if visible (e.g. @handle); ambiguous=true if the name could match several real places; search_query = "name, city, country" using only known parts. Omit keys that are null or empty. No text outside the JSON."#,
         sources = joined(SourceType::ALL, SourceType::as_str),
         categories = joined(PlaceCategory::ALL, PlaceCategory::as_str),
         facts = joined(TravelFactType::ALL, TravelFactType::as_str),

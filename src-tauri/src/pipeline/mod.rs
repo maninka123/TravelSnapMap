@@ -69,6 +69,17 @@ impl Pipeline {
         }
     }
 
+    /// Writes an orientation-corrected JPEG of a screenshot from Photos or from a folder.
+    pub async fn export_source(&self, asset_id: &str, dest: &Path) -> Result<()> {
+        match crate::services::folder::file_path(asset_id) {
+            Some(file) => {
+                anyhow::ensure!(file.exists(), "The file was moved or deleted: {}", file.display());
+                self.photos.crop_image(&file, dest, Rect::new(0.0, 0.0, 1.0, 1.0), 2048).await
+            }
+            None => self.photos.export_image(asset_id, dest, 2048).await,
+        }
+    }
+
     /// Called whenever stored data changes outside the screenshot queue (e.g. Reel progress).
     pub fn set_notifier(&self, f: Arc<dyn Fn() + Send + Sync>) {
         *self.notifier.write().unwrap() = Some(f);
@@ -124,6 +135,7 @@ impl Pipeline {
             }
         };
         self.time("pipeline.total", start);
+        let _ = self.db.set_pipeline_ms(screenshot_id, start.elapsed().as_millis() as i64);
         status
     }
 
@@ -184,7 +196,9 @@ impl Pipeline {
         let is_travel = user == Some(Classification::Travel)
             || (extraction.is_travel_related && p >= config.minimum_ai_confidence_for_auto_acceptance);
         if !is_travel {
-            if extraction.is_travel_related && p >= config.travel_review_threshold {
+            // Ask the user only when there is something to put on the map; otherwise it stays "low confidence"
+            // (visible under that filter and overridable) instead of filling the Review inbox.
+            if extraction.is_travel_related && p >= config.travel_review_threshold && !extraction.all_places().is_empty() {
                 // 0.5–0.8: ask the user; the extraction is cached so "Yes" costs no new AI call.
                 self.db.set_classification(id, Classification::Uncertain, Some(p), 2).map_err(fail)?;
                 let msg = extraction.reason.clone().unwrap_or_else(|| "The AI isn't sure this is travel-related.".into());
@@ -192,8 +206,10 @@ impl Pipeline {
                 self.db.finish_screenshot(id, ProcessingStatus::NeedsReview, None).map_err(fail)?;
                 return Ok(ProcessingStatus::NeedsReview);
             }
-            self.db.set_classification(id, Classification::NotTravel, Some(p), 2).map_err(fail)?;
-            self.db.finish_screenshot(id, ProcessingStatus::NotTravel, extraction.reason.as_deref()).map_err(fail)?;
+            let uncertain = extraction.is_travel_related && p >= config.travel_review_threshold;
+            self.db.set_classification(id, if uncertain { Classification::Uncertain } else { Classification::NotTravel }, Some(p), 2).map_err(fail)?;
+            let detail = if uncertain { Some("Possibly travel, but no specific place found".to_string()) } else { extraction.reason.clone() };
+            self.db.finish_screenshot(id, ProcessingStatus::NotTravel, detail.as_deref()).map_err(fail)?;
             return Ok(ProcessingStatus::NotTravel);
         }
         self.db.set_classification(id, Classification::Travel, Some(p.max(if user.is_some() { 1.0 } else { 0.0 })), 2).map_err(fail)?;
@@ -214,7 +230,7 @@ impl Pipeline {
         self.db.set_status(&shot.id, ProcessingStatus::Loading, None).map_err(fail)?;
         if !have_image {
             let t = Instant::now();
-            self.photos.export_image(&shot.photos_id, &image_path, 2048).await.map_err(fail)?;
+            self.export_source(&shot.photos_id, &image_path).await.map_err(fail)?;
             self.time("photos.export", t);
         }
         let thumb = self.path("thumbnails", &format!("{}.jpg", shot.id));
@@ -232,6 +248,7 @@ impl Pipeline {
             fail(e)
         })?;
         self.time("ocr", t);
+        let _ = self.db.set_ocr_ms(&shot.id, t.elapsed().as_millis() as i64);
         let thumb_str = thumb_ok.then(|| thumb.to_string_lossy().to_string());
         let records = self.db.save_ocr(&shot.id, &blocks, &image_path.to_string_lossy(), thumb_str.as_deref()).map_err(fail)?;
         Ok((image_path, records))
@@ -241,13 +258,16 @@ impl Pipeline {
     async fn extract(&self, shot: &ScreenshotRecord, input: &ScreenshotAiInput, config: &AppConfig) -> Result<TravelExtraction, Stop> {
         let ai = self.ai();
         let model = ai.model_name();
-        let ocr_hash = self.db.screenshot(&shot.id).ok().flatten().and_then(|s| s.ocr_hash).unwrap_or_default();
-        let cache_key = if input.image_jpeg.is_some() { format!("{ocr_hash}+image:{}", shot.id) } else { ocr_hash };
+        // Keyed on exactly what the AI would see (UI chrome, clock and battery already removed), so
+        // near-identical screenshots share one result.
+        let input_hash = crate::text::stable_hash(&input.lines.join("\n"));
+        let cache_key = if input.image_jpeg.is_some() { format!("{input_hash}+image:{}", shot.id) } else { input_hash };
 
         // Never send the same content twice for the same model + prompt version.
         if let Ok(Some(json)) = self.db.ai_cache_get(&cache_key, &model, AI_PROMPT_VERSION, "extraction") {
             if let Ok(cached) = decode_json::<TravelExtraction>(&json) {
                 self.db.add_metric("ai.cacheHits", 1.0);
+                let _ = self.db.ai_cache_put(&format!("shot:{}", shot.id), &model, AI_PROMPT_VERSION, "extraction", &shot.id, &json);
                 return Ok(cached);
             }
         }
@@ -259,7 +279,9 @@ impl Pipeline {
         let borderline = result.value.is_travel_related
             && result.value.travel_confidence >= config.travel_review_threshold
             && result.value.travel_confidence < config.minimum_ai_confidence_for_auto_acceptance;
-        if level == 2 && config.allow_thinking_escalation && (result.value.is_ambiguous() || borderline) {
+        // Only worth it when there are places to disambiguate.
+        let has_places = !result.value.all_places().is_empty();
+        if level == 2 && config.allow_thinking_escalation && has_places && (result.value.is_ambiguous() || borderline) {
             if let Ok(better) = self.call_extraction(shot, input, true, config).await {
                 result = better;
                 level = 3;
@@ -267,6 +289,7 @@ impl Pipeline {
         }
         let _ = self.db.set_classification(&shot.id, Classification::Unknown, None, level);
         let _ = self.db.ai_cache_put(&cache_key, &model, AI_PROMPT_VERSION, "extraction", &shot.id, &result.raw_json);
+        let _ = self.db.ai_cache_put(&format!("shot:{}", shot.id), &model, AI_PROMPT_VERSION, "extraction", &shot.id, &result.raw_json);
         Ok(result.value)
     }
 
@@ -313,11 +336,14 @@ impl Pipeline {
 
         let mut ctx = ResolutionContext::default();
         let mut linked: Vec<(String, bool)> = Vec::new();
+        let mut auto_resolved = 0i64;
         let mut places = extraction.all_places();
         // Resolve the most specific places first so they anchor the rest ("7 places in Kyoto").
         places.sort_by_key(|p| p.ambiguous == Some(true));
         // Places the user already decided for this source are never re-resolved by AI.
         places.retain(|p| crate::text::best_similarity(&p.display_name, user_names) < 0.9);
+        // "Europe", "Japan"… are context, not places to pin.
+        places.retain(|p| !crate::text::is_country_or_continent(&p.display_name));
 
         for place in &places {
             let t = Instant::now();
@@ -341,6 +367,7 @@ impl Pipeline {
                     ctx.anchors.push((cand.latitude, cand.longitude));
                     self.db.add_metric(if outcome.created { "places.created" } else { "places.merged" }, 1.0);
                     self.db.add_metric("maps.autoResolved", 1.0);
+                    auto_resolved += 1;
                     if let Some(other) = outcome.possible_duplicate_of {
                         review(ReviewKind::DuplicatePlace, "These may be the same place.", place, &[], Some(&outcome.place_id), Some(&other)).map_err(fail)?;
                     }
@@ -362,6 +389,11 @@ impl Pipeline {
                 }
             }
         }
+        let (table, id) = match evidence {
+            Evidence::Screenshot(s) => ("screenshots", s.id.as_str()),
+            Evidence::Reel(r) => ("reels", r.id.as_str()),
+        };
+        let _ = self.db.set_place_counts(table, id, places.len() as i64, auto_resolved);
         Ok(linked)
     }
 

@@ -33,7 +33,7 @@ export function ProcessingBar() {
           {snap.running ? (snap.paused ? "⏸ Paused" : "⏳ Scanning screenshots") : snap.lastError ? "⚠️ " + snap.lastError : "✓ " + snap.phase}
         </div>
         <div className="pb-stats">
-          {snap.discovered > 0 && <span>{snap.discovered.toLocaleString()} found{snap.newlyDiscovered ? ` (${snap.newlyDiscovered} new)` : ""}</span>}
+          {snap.inPhotos > 0 && <span>{snap.inPhotos.toLocaleString()} screenshots · {snap.alreadyKnown.toLocaleString()} known · {snap.newlyDiscovered.toLocaleString()} new</span>}
           <span>Processed {snap.processed}/{snap.total}</span>
           <span>Travel {snap.travel}</span>
           <span>Not travel {snap.notTravel}</span>

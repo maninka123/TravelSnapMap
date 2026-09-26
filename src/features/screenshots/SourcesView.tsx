@@ -5,6 +5,7 @@ import { Empty, Pill, Thumb } from "../../components/common";
 import { formatDate, formatTime, PROCESSING, SOURCE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { ImportReelDialog } from "../reels/ImportReelDialog";
+import { ScanControls } from "../../components/ScanControls";
 
 const VIEWS: { key: ScreenshotView; label: string }[] = [
   { key: "all", label: "All travel" },
@@ -41,8 +42,8 @@ export function SourcesView() {
             </button>
           ))}
         </div>
-        <button className="btn primary" onClick={() => setImporting(true)}>🎬 Import Reel</button>
-        <button className="btn" onClick={() => action.run(() => ProcessingService.start(true))}>Scan Photos</button>
+        <ScanControls />
+        <button className="btn" onClick={() => setImporting(true)}>🎬 Import Reel</button>
       </div>
 
       <div className="toolbar">

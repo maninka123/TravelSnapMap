@@ -1,12 +1,12 @@
 # TravelSnapMap
 
-Turn years of scattered travel screenshots in Apple Photos — and Instagram Reels you paste in — into an organised,
+Turn years of scattered travel screenshots — from Apple Photos or any folder — and Instagram Reels you paste in, into an organised,
 searchable map of places, photos and tips, while keeping every original screenshot and Reel as the source.
 
 **macOS · local-first · Tauri + React + TypeScript + Rust + SQLite + a small Swift helper (PhotoKit, Vision, Speech, MapKit) · DeepSeek (`deepseek-flash`)**
 
 ```
-Apple Photos ─► Swift bridge (PhotoKit) ─► Apple Vision OCR (on your Mac)
+Apple Photos / screenshot folder ─► Swift bridge ─► Apple Vision OCR (on your Mac)
                                                 │
 Instagram Reel URL ─► video ─► audio transcript (on-device) + caption + key-frame OCR
                                                 │
@@ -37,7 +37,7 @@ Requirements (macOS 26+):
 | Xcode **Command Line Tools** (the full Xcode app is not needed) | `xcode-select --install` |
 | Node.js 20+ | `brew install node` |
 | Rust | `curl https://sh.rustup.rs -sSf \| sh` |
-| *Optional:* yt-dlp (downloads Reel videos from a pasted link) | `brew install yt-dlp` |
+| *Optional:* yt-dlp (downloads Reel videos from a pasted link) | `brew install yt-dlp`, or the standalone binary: `curl -L -o ~/.local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos && chmod +x ~/.local/bin/yt-dlp` |
 
 ```bash
 cp .env.example .env.local        # then put your DeepSeek key in it
@@ -51,20 +51,55 @@ Command Line Tools, so an un-accepted Xcode licence never blocks you).
 
 ### Permissions
 
-On first use macOS asks for **Photos** (screenshots) and **Speech Recognition** (Reel transcripts). During
-`tauri dev` the prompt is attributed to the app you launched it from (Terminal, VS Code, Cursor). A bundled app
-(`npm run tauri build`) asks as TravelSnapMap.
+On first use macOS asks for **Photos** access as **“TravelSnapMap Photos Bridge”** (the small helper that reads
+screenshots). The helper makes itself responsible for its own privacy requests, so this works the same in `tauri dev`
+(launched from Terminal, VS Code or Cursor) and in the bundled app. Reel transcription uses Apple's on-device
+`SpeechTranscriber` and needs no extra permission; only languages it doesn't cover fall back to the classic recogniser,
+which asks for Speech Recognition access.
 
 ### DeepSeek key
 
 The key is looked up in this order, and is never committed:
 
 1. `DEEPSEEK_API_KEY` environment variable / `.env.local` (development)
-2. A key pasted in **Settings** (stored in the local app database, outside the repo)
+2. A key pasted in **Settings**, stored in the **macOS Keychain** (never in the database or a file)
 
 For production, set **Settings → API base URL** to your own backend proxy so the secret stays on a server.
 
 ---
+
+## Using it
+
+- **📸 Scan New Screenshots** (Sources, or the Map's first-run card) — compares PhotoKit asset IDs (and file paths of
+  your folders) with the database and processes only screenshots it hasn't seen. Interrupted work resumes; failed items
+  are retried only when you ask (**Retry failed**), so a persistent error never burns AI calls in a loop.
+- **🧪 Test run…** — process 10 / 25 / 50 / 100 unprocessed screenshots (random sample or newest) and get a report:
+  travel / not travel / needs review / failed, places found, place-resolution success, OCR and AI time, and the
+  estimated DeepSeek cost. Past runs are listed in Settings.
+- **📁 Import Folder…** — screenshots from any device (PNG, JPG, HEIC…). Same pipeline, same "only new" logic.
+- **Automatically process new screenshots** (Settings, **off by default**) — when on, new screenshots are processed as
+  soon as Photos reports them.
+- **🎬 Import Reel** — paste an Instagram Reel/Post link. The Reel page shows each stage (Caption → Video → Audio →
+  Transcript → Keyframes → OCR → AI extraction → Places resolved) with timings; a failed stage never stops the others.
+  **Auto language** picks the spoken language from the caption / on-screen text; you can re-transcribe in English,
+  Japanese, Chinese, Korean, Tamil and every other language Apple supports on your Mac (Sinhala isn't supported by
+  Apple speech recognition — its caption and on-screen text are still used).
+
+## Real-data results
+
+Measured on this Mac with the real pipeline (Vision OCR → local filter → DeepSeek Flash → Apple Maps):
+
+| | 100 random real screenshots | 15 real Instagram Reels |
+|---|---|---|
+| Failures | 0 | 0 (14 of 15 usable; 1 login-only post asks for the video from Photos) |
+| Handled locally, no AI call | 42 % | — |
+| Places auto-resolved | 81 % | 39 of 42 places (93 %) |
+| Average time | 0.9 s OCR · 2.6 s AI · 3.7 s total | 8–37 s per Reel (75 s for a 19-place itinerary) |
+| DeepSeek cost | **≈ $0.011 per 100 screenshots** | **≈ $0.0002 per Reel** ($0.0031 for all 15) |
+
+Each issue found in these runs became a regression test (`cargo test`), e.g. a travel TikTok the local filter missed,
+a place Maps returned without a country, a Kyoto spa matched to a Gion in Hiroshima, and Reels with many places that
+exceeded the output limit.
 
 ## How it works
 
@@ -145,14 +180,18 @@ TODO.md                   Build progress checklist
 ## Tests
 
 ```bash
-cd src-tauri && cargo test          # 52 tests: decoding, scoring, dedupe, crops, states, full pipelines with mocks
-# Live check with real Vision OCR + DeepSeek + Apple Maps on any image (uses your key, costs ~$0.0001):
-TSM_LIVE_IMAGE=/path/to/screenshot.jpg cargo test live_ -- --ignored --nocapture
+cd src-tauri && cargo test          # 65 tests: decoding, scoring, dedupe, crops, states, full pipelines with mocks, real-data regressions
+# Live checks (use your key; tiny cost):
+TSM_LIVE_IMAGE=/path/to/screenshot.jpg cargo test live_screenshot -- --ignored --nocapture
+TSM_LIVE_COUNT=100 TSM_LIVE_DB=/tmp/v.sqlite cargo test live_photos -- --ignored --nocapture   # real Photos sample
+TSM_LIVE_REELS=urls.txt TSM_LIVE_DB=/tmp/r.sqlite cargo test live_reels -- --ignored --nocapture   # real Reels
 npm run build                       # type-check + production frontend build
 ```
 
 ## Notes & limits
 - `ocr_blocks` are SQLite rows; OCR for the whole library stays local.
+- Logs (release builds): `~/Library/Logs/TravelSnapMap/travelsnapmap.log` — screenshot contents are never logged.
+- Production CSP allows only the app itself, local files and the map tile host; development keeps a relaxed policy for hot reload.
 - Instagram frequently blocks anonymous downloads. With yt-dlp + browser cookies most public Reels work; otherwise use
   the Photos fallback.
 - Map tiles come from OpenFreeMap (no key). Place search uses Apple Maps through the bridge.

@@ -11,7 +11,7 @@ use crate::config::{resolve_api_key, AppConfig};
 use crate::db::*;
 use crate::models::*;
 use crate::pipeline::merge;
-use crate::pipeline::queue::QueueSnapshot;
+use crate::pipeline::queue::{QueueSnapshot, RunMode};
 use crate::services::ai::deepseek::DeepSeekTravelAIService;
 use crate::AppState;
 
@@ -27,7 +27,7 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 pub async fn get_overview(state: State<'_, AppState>) -> CmdResult<Value> {
     let counts = state.db.screenshot_counts().map_err(err)?;
     let config = state.pipeline.config();
-    let (key, source) = resolve_api_key(state.db.setting("deepseekApiKey").map_err(err)?);
+    let (key, source) = resolve_api_key();
     Ok(json!({
         "screenshotCounts": counts,
         "openReviews": state.db.open_review_count().map_err(err)?,
@@ -53,11 +53,73 @@ pub async fn request_photos_permission(state: State<'_, AppState>) -> CmdResult<
     Ok(status)
 }
 
+/// mode: {"kind": "scanNew"} | {"kind": "validation", "count": 25, "random": true} | {"kind": "retry"}
 #[tauri::command]
-pub async fn start_processing(state: State<'_, AppState>, discover: bool, limit: Option<i64>) -> CmdResult<()> {
+pub async fn start_processing(state: State<'_, AppState>, mode: RunMode) -> CmdResult<()> {
     let queue = state.queue.clone();
-    tauri::async_runtime::spawn(queue.run(discover, limit));
+    tauri::async_runtime::spawn(queue.run(mode));
     Ok(())
+}
+
+/// How many screenshots each source has, how many are already known, and how many are new
+/// (PhotoKit asset IDs / file paths compared with the database).
+#[tauri::command]
+pub async fn scan_preview(state: State<'_, AppState>) -> CmdResult<Value> {
+    let config = state.pipeline.config();
+    let known = state.db.known_photo_ids().map_err(err)?;
+    let count = |assets: &[crate::services::native::AssetInfo]| {
+        let already = assets.iter().filter(|a| known.contains(&a.id)).count();
+        json!({ "total": assets.len(), "known": already, "new": assets.len() - already })
+    };
+    let photos = match state.pipeline.photos.list_screenshots(config.scan_from_year, config.scan_to_year).await {
+        Ok(a) => count(&a),
+        Err(e) => json!({ "error": e.to_string() }),
+    };
+    let mut folders = Vec::new();
+    for f in &config.screenshot_folders {
+        let v = match crate::services::folder::scan_folder(std::path::Path::new(f)) {
+            Ok(a) => count(&a),
+            Err(e) => json!({ "error": e.to_string() }),
+        };
+        folders.push(json!({ "path": f, "summary": v }));
+    }
+    Ok(json!({ "photos": photos, "folders": folders }))
+}
+
+/// Adds a folder of screenshots (from any device) and scans its new images.
+#[tauri::command]
+pub async fn add_screenshot_folder(state: State<'_, AppState>, path: String) -> CmdResult<()> {
+    let dir = std::path::Path::new(&path);
+    if !dir.is_dir() {
+        return Err("That folder doesn't exist.".into());
+    }
+    let mut config = state.pipeline.config();
+    if !config.screenshot_folders.contains(&path) {
+        config.screenshot_folders.push(path.clone());
+        state.db.save_config(&config).map_err(err)?;
+        rebuild_ai(&state, config)?;
+    }
+    tauri::async_runtime::spawn(state.queue.clone().run(RunMode::ScanFolder { path }));
+    Ok(())
+}
+
+/// Stops scanning a folder (screenshots already imported stay in the library).
+#[tauri::command]
+pub async fn remove_screenshot_folder(state: State<'_, AppState>, path: String) -> CmdResult<()> {
+    let mut config = state.pipeline.config();
+    config.screenshot_folders.retain(|f| f != &path);
+    state.db.save_config(&config).map_err(err)?;
+    rebuild_ai(&state, config)
+}
+
+#[tauri::command]
+pub async fn list_runs(state: State<'_, AppState>) -> CmdResult<Vec<RunRecord>> {
+    state.db.runs().map_err(err)
+}
+
+#[tauri::command]
+pub async fn run_report(state: State<'_, AppState>, id: String) -> CmdResult<Option<RunReport>> {
+    state.db.run_report(&id).map_err(err)
 }
 
 #[tauri::command]
@@ -87,7 +149,7 @@ pub async fn processing_status(state: State<'_, AppState>) -> CmdResult<QueueSna
 #[tauri::command]
 pub async fn reprocess(state: State<'_, AppState>, scope: String, ids: Option<Vec<String>>) -> CmdResult<usize> {
     let targets = state.db.mark_for_reprocess(&scope, &ids.unwrap_or_default()).map_err(err)?;
-    tauri::async_runtime::spawn(state.queue.clone().run(false, None));
+    tauri::async_runtime::spawn(state.queue.clone().run(RunMode::Retry));
     Ok(targets.len())
 }
 
@@ -316,7 +378,7 @@ pub async fn remove_trip_entry(state: State<'_, AppState>, entry_id: String) -> 
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Value> {
-    let (key, source) = resolve_api_key(state.db.setting("deepseekApiKey").map_err(err)?);
+    let (key, source) = resolve_api_key();
     Ok(json!({
         "config": state.pipeline.config(),
         "defaults": AppConfig::default(),
@@ -326,7 +388,7 @@ pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Value> {
 }
 
 fn rebuild_ai(state: &AppState, config: AppConfig) -> CmdResult<()> {
-    let (key, _) = resolve_api_key(state.db.setting("deepseekApiKey").map_err(err)?);
+    let (key, _) = resolve_api_key();
     let ai = Arc::new(DeepSeekTravelAIService::new(config.clone(), key));
     state.pipeline.reconfigure(config, ai);
     Ok(())
@@ -338,11 +400,10 @@ pub async fn save_settings(state: State<'_, AppState>, config: AppConfig) -> Cmd
     rebuild_ai(&state, config)
 }
 
-/// Stores a key in the local app database (outside the repository). `None` removes it.
+/// Stores the key in the macOS Keychain. `None` removes it.
 #[tauri::command]
 pub async fn save_api_key(state: State<'_, AppState>, key: Option<String>) -> CmdResult<()> {
-    let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
-    state.db.set_setting("deepseekApiKey", key.as_deref()).map_err(err)?;
+    crate::secrets::set_deepseek_key(key.as_deref()).map_err(err)?;
     rebuild_ai(&state, state.pipeline.config())
 }
 
@@ -431,4 +492,18 @@ pub async fn open_external(url: String) -> CmdResult<()> {
     }
     std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
     Ok(())
+}
+
+/// Re-transcribe a Reel with a chosen language ("auto" to detect again) and update its places.
+#[tauri::command]
+pub async fn retranscribe_reel(state: State<'_, AppState>, id: String, locale: String) -> CmdResult<()> {
+    let pipeline = state.pipeline.clone();
+    tauri::async_runtime::spawn(async move { pipeline.retranscribe_reel(&id, &locale).await });
+    Ok(())
+}
+
+/// Speech locales Apple supports on this Mac (and whether they run on-device).
+#[tauri::command]
+pub async fn speech_locales(state: State<'_, AppState>) -> CmdResult<Vec<crate::services::native::SpeechLocale>> {
+    state.pipeline.media.speech_locales().await.map_err(err)
 }

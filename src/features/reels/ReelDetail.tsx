@@ -5,6 +5,7 @@ import { CategoryChip, ErrorNote, PlaceLine, Pill, Thumb } from "../../component
 import { FACT, formatDate, formatTime, PROCESSING, SOURCE_KIND } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { PhotosVideoPicker } from "./ImportReelDialog";
+import { ReelStages, TranscriptLanguage } from "./ReelStages";
 
 /** A saved Reel: video, saved voice audio, timestamped transcript, key snapshots and what was extracted. */
 export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
@@ -58,6 +59,8 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
         </div>
       )}
 
+      <ReelStages reel={r} />
+
       <div className="shot-layout">
         <div className="stack">
           {mediaSrc ? (
@@ -82,7 +85,8 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
           )}
 
           <div className="card">
-            <h3>Voice transcript {r.transcriptLocale && <span className="muted small">({r.transcriptLocale}, on-device)</span>}</h3>
+            <h3>Voice transcript {r.transcriptLocale && <span className="muted small">({r.transcriptLocale})</span>}</h3>
+            <TranscriptLanguage reel={r} />
             {r.transcript.length === 0 ? <p className="muted small">{busy ? "Transcribing…" : "No speech found."}</p> : (
               <div className="transcript">
                 {r.transcript.map((seg, i) => (

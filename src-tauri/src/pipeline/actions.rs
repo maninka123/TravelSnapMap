@@ -103,10 +103,17 @@ impl Pipeline {
             (ReviewKind::PlaceResolution, "choose") => {
                 let cand = candidate.ok_or_else(|| anyhow!("no candidate chosen"))?;
                 if let Some(provisional) = review.place_a_id.as_deref() {
-                    self.db.unlink(provisional, &sid)?;
-                    self.drop_if_orphan(provisional)?;
+                    // Keep the facts (and their OCR provenance): move them rather than re-extracting.
+                    let names_only = extracted.clone().map(|e| ExtractedPlace { facts: None, ..e });
+                    let chosen = self.user_attach(&sid, &cand, names_only.as_ref())?;
+                    if chosen != provisional {
+                        self.db.move_source_evidence(provisional, &chosen, Some(&sid), None)?;
+                        self.db.unlink(provisional, &sid)?;
+                        self.drop_if_orphan(provisional)?;
+                    }
+                } else {
+                    self.user_attach(&sid, &cand, extracted.as_ref())?;
                 }
-                self.user_attach(&sid, &cand, extracted.as_ref())?;
                 self.db.resolve_review(review_id, "chose place")?;
             }
             (ReviewKind::PlaceResolution, "dismiss") => {
@@ -171,7 +178,7 @@ impl Pipeline {
         let image_path = self.data_dir.join("screenshots").join(format!("{screenshot_id}.jpg"));
         if !image_path.exists() {
             let shot = self.db.screenshot(screenshot_id)?.ok_or_else(|| anyhow!("screenshot not found"))?;
-            self.photos.export_image(&shot.photos_id, &image_path, 2048).await?;
+            self.export_source(&shot.photos_id, &image_path).await?;
         }
         let rect = rect.clamped();
         let crop_path = self.data_dir.join("crops").join(format!("{}.jpg", new_id()));
@@ -214,10 +221,17 @@ impl Pipeline {
             (ReviewKind::PlaceResolution, "choose") => {
                 let cand = candidate.ok_or_else(|| anyhow!("no candidate chosen"))?;
                 if let Some(provisional) = review.place_a_id.as_deref() {
-                    self.db.unlink_reel(provisional, reel_id)?;
-                    self.drop_if_orphan(provisional)?;
+                    // Keep the facts with their Reel timestamps: move them to the chosen place.
+                    let names_only = extracted.cloned().map(|e| ExtractedPlace { facts: None, ..e });
+                    let chosen = self.user_attach_reel(reel_id, &cand, names_only.as_ref())?;
+                    if chosen != provisional {
+                        self.db.move_source_evidence(provisional, &chosen, None, Some(reel_id))?;
+                        self.db.unlink_reel(provisional, reel_id)?;
+                        self.drop_if_orphan(provisional)?;
+                    }
+                } else {
+                    self.user_attach_reel(reel_id, &cand, extracted)?;
                 }
-                self.user_attach_reel(reel_id, &cand, extracted)?;
                 self.db.resolve_review(&review.id, "chose place")?;
             }
             (ReviewKind::PlaceResolution, "dismiss") => {

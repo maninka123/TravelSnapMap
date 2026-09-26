@@ -92,12 +92,14 @@ impl DeepSeekClient {
                     let text = response.text().await.unwrap_or_default();
                     return Err(AiError::Http { status, message: text.chars().take(200).collect() });
                 }
-                Err(e) if e.is_timeout() && attempt < self.config.max_retries => {
+                // Transient network hiccups: retry with backoff before giving up.
+                Err(_) if attempt < self.config.max_retries => {
                     attempt += 1;
                     tokio::time::sleep(retry_delay).await;
                 }
-                Err(e) if e.is_connect() || e.is_timeout() || e.is_request() => return Err(AiError::Offline),
-                Err(_) => return Err(AiError::InvalidResponse),
+                Err(e) if e.is_connect() => return Err(AiError::Offline),
+                Err(e) if e.is_timeout() => return Err(AiError::Timeout),
+                Err(e) => return Err(AiError::Http { status: 0, message: e.to_string().chars().take(200).collect() }),
             }
         }
     }
@@ -106,7 +108,7 @@ impl DeepSeekClient {
         let choice = &json["choices"][0];
         let content = choice["message"]["content"].as_str().ok_or(AiError::InvalidResponse)?.to_string();
         if choice["finish_reason"].as_str() == Some("length") {
-            return Err(AiError::InvalidJson("response truncated at max_tokens".into()));
+            return Err(AiError::Truncated);
         }
         let usage = &json["usage"];
         let prompt = usage["prompt_tokens"].as_u64().unwrap_or(0);
@@ -156,8 +158,17 @@ impl DeepSeekTravelAIService {
     ) -> Result<AiResult<T>, AiError> {
         let mut total: Option<AiUsage> = None;
         let mut last_error = AiError::InvalidResponse;
-        for _ in 0..2 {
-            let completion = self.client.complete_json(system, user, image, thinking, self.max_tokens(thinking)).await?;
+        // Sources with many places (a "7 places in Kyoto" Reel) need more room; grow once if cut off.
+        let mut max_tokens = if user.contains("app_hint: instagram_reel") { self.max_tokens(thinking).max(4000) } else { self.max_tokens(thinking) };
+        for _ in 0..3 {
+            let completion = match self.client.complete_json(system, user, image, thinking, max_tokens).await {
+                Err(AiError::Truncated) if max_tokens < 6000 => {
+                    max_tokens *= 2;
+                    last_error = AiError::Truncated;
+                    continue;
+                }
+                other => other?,
+            };
             let usage = match total.take() {
                 Some(prev) => combine(prev, completion.usage),
                 None => completion.usage,

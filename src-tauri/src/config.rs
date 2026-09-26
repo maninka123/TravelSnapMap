@@ -5,11 +5,15 @@ use serde::{Deserialize, Serialize};
 /// Bumping these marks existing results as outdated so they can be re-run selectively.
 pub const PROCESSING_VERSION: i64 = 1;
 pub const OCR_VERSION: i64 = 1;
-pub const AI_PROMPT_VERSION: i64 = 1;
+pub const AI_PROMPT_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
+    /// Settings schema version; older saved settings are upgraded once on load.
+    /// (Field-level default: settings saved before versioning existed read as 0, not the current version.)
+    #[serde(default)]
+    pub config_version: u32,
     // Model
     pub model: String,
     /// Chat-completions base URL. Point at a backend proxy in production so the DeepSeek
@@ -53,9 +57,13 @@ pub struct AppConfig {
     pub scan_from_year: Option<i32>,
     pub scan_to_year: Option<i32>,
     pub nearby_radius_km: f64,
+    /// Process screenshots as soon as Photos reports new ones (off by default).
+    pub auto_process_new_screenshots: bool,
+    /// Folders of screenshot images scanned alongside Apple Photos.
+    pub screenshot_folders: Vec<String>,
 
     // Instagram Reels
-    /// Locale for on-device speech transcription (e.g. en-US, ja-JP).
+    /// "auto" (detect from the Reel) or a locale such as ja-JP.
     pub transcription_locale: String,
     /// Key snapshots OCR'd per Reel (OCR never runs on every frame).
     pub max_keyframes: u32,
@@ -73,12 +81,14 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            config_version: CONFIG_VERSION,
             model: "deepseek-flash".into(),
             base_url: "https://api.deepseek.com".into(),
             use_thinking_by_default: false,
             allow_thinking_escalation: true,
             allow_vision_requests: true,
-            max_output_tokens: 900,
+            // A cap, not a cost: billing is per generated token. Too low just wastes cut-off attempts.
+            max_output_tokens: 1500,
             thinking_max_output_tokens: 3000,
             vision_image_max_pixel_size: 768,
             request_timeout_secs: 60,
@@ -89,7 +99,7 @@ impl Default for AppConfig {
             minimum_ai_confidence_for_auto_acceptance: 0.8,
             travel_review_threshold: 0.5,
             place_auto_accept_score: 0.75,
-            place_review_score: 0.45,
+            place_review_score: 0.6,
             region_auto_accept_confidence: 0.75,
             region_review_confidence: 0.5,
             duplicate_image_distance: 0.08,
@@ -97,7 +107,9 @@ impl Default for AppConfig {
             scan_from_year: None,
             scan_to_year: None,
             nearby_radius_km: 10.0,
-            transcription_locale: "en-US".into(),
+            auto_process_new_screenshots: false,
+            screenshot_folders: Vec::new(),
+            transcription_locale: "auto".into(),
             max_keyframes: 8,
             yt_dlp_path: String::new(),
             cookies_from_browser: String::new(),
@@ -108,7 +120,22 @@ impl Default for AppConfig {
     }
 }
 
+pub const CONFIG_VERSION: u32 = 2;
+
 impl AppConfig {
+    /// Moves settings saved by older builds to the current defaults where the old default was
+    /// measured to be wrong on real data; values the user changed are kept.
+    pub fn upgraded(mut self) -> Self {
+        if self.config_version < 2 {
+            if matches!(self.max_output_tokens, 700 | 900) { self.max_output_tokens = 1500; }
+            if (self.place_review_score - 0.45).abs() < 1e-9 { self.place_review_score = 0.6; }
+            if self.transcription_locale == "en-US" { self.transcription_locale = "auto".into(); }
+            if (self.duplicate_image_distance - 0.35).abs() < 1e-9 { self.duplicate_image_distance = 0.08; }
+        }
+        self.config_version = CONFIG_VERSION;
+        self
+    }
+
     pub fn estimated_cost(&self, cache_miss: u64, cache_hit: u64, output: u64) -> f64 {
         (cache_miss as f64 * self.price_input_cache_miss_per_million
             + cache_hit as f64 * self.price_input_cache_hit_per_million
@@ -122,18 +149,33 @@ impl AppConfig {
     }
 }
 
-/// Finds the DeepSeek key without it ever being committed. Order:
-/// 1. `DEEPSEEK_API_KEY` environment variable
-/// 2. `.env.local` / `.env` in the project root (development; loaded at startup)
-/// 3. key saved from Settings (stored in the local app data folder, outside the repo)
-pub fn resolve_api_key(saved: Option<String>) -> (Option<String>, &'static str) {
+/// Finds the DeepSeek key without it ever being committed or stored in plain text. Order:
+/// 1. `DEEPSEEK_API_KEY` environment variable / `.env.local` (development; loaded at startup)
+/// 2. macOS Keychain (saved from Settings)
+pub fn resolve_api_key() -> (Option<String>, &'static str) {
     if let Ok(k) = std::env::var("DEEPSEEK_API_KEY") {
         if !k.trim().is_empty() {
             return (Some(k.trim().to_string()), "environment / .env.local");
         }
     }
-    match saved.filter(|k| !k.trim().is_empty()) {
-        Some(k) => (Some(k), "saved in Settings"),
+    match crate::secrets::deepseek_key() {
+        Some(k) => (Some(k), "macOS Keychain"),
         None => (None, "not configured"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_are_upgraded_but_user_choices_kept() {
+        let old: AppConfig = serde_json::from_str(r#"{"maxOutputTokens": 700, "placeReviewScore": 0.45, "transcriptionLocale": "en-US", "model": "my-model"}"#).unwrap();
+        assert_eq!(old.config_version, 0);
+        let new = old.upgraded();
+        assert_eq!((new.max_output_tokens, new.place_review_score, new.transcription_locale.as_str()), (1500, 0.6, "auto"));
+        assert_eq!(new.model, "my-model");
+        let custom: AppConfig = serde_json::from_str(r#"{"maxOutputTokens": 2500}"#).unwrap();
+        assert_eq!(custom.upgraded().max_output_tokens, 2500);
     }
 }

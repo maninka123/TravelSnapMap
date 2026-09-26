@@ -44,6 +44,7 @@ enum MediaService {
     /// Word-level transcript with timestamps. On-device recognition is required when the
     /// locale supports it, so audio never leaves the Mac.
     static func transcribe(path: String, locale: String) async throws -> [String: Any] {
+        // Only the classic recogniser needs this permission (the on-device SpeechTranscriber does not).
         guard await speechAuthorization() == "authorized" else {
             throw BridgeError.message("Speech recognition permission not granted")
         }
@@ -62,9 +63,14 @@ enum MediaService {
                 guard !finished else { return }
                 if let result, result.isFinal {
                     finished = true
-                    continuation.resume(returning: result.bestTranscription.segments.map {
-                        ["text": $0.substring, "start": $0.timestamp, "duration": $0.duration, "confidence": Double($0.confidence)]
-                    })
+                    let words: [[String: Any]] = result.bestTranscription.segments.map { segment in
+                        let word: [String: Any] = [
+                            "text": segment.substring, "start": segment.timestamp,
+                            "duration": segment.duration, "confidence": Double(segment.confidence),
+                        ]
+                        return word
+                    }
+                    continuation.resume(returning: words)
                 } else if let error {
                     finished = true
                     // "No speech detected" is a normal outcome for music-only Reels.
@@ -87,36 +93,50 @@ enum MediaService {
     static func keyframes(path: String, outDir: String, maxFrames: Int, interval: Double) async throws -> [String: Any] {
         let asset = AVURLAsset(url: URL(fileURLWithPath: path))
         let duration = try await asset.load(.duration).seconds
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 1080, height: 1920)
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.2, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.2, preferredTimescale: 600)
+        let tolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
 
-        var candidates: [(time: Double, image: CGImage, signature: [Double], change: Double)] = []
-        var last: [Double]?
+        // Pass 1: find scene changes on tiny thumbnails, requested as one batch (fast).
+        let sampler = AVAssetImageGenerator(asset: asset)
+        sampler.appliesPreferredTrackTransform = true
+        sampler.maximumSize = CGSize(width: 96, height: 170)
+        sampler.requestedTimeToleranceBefore = tolerance
+        sampler.requestedTimeToleranceAfter = tolerance
+        var times: [CMTime] = []
         var t = min(0.5, duration / 2)
         while t < duration {
-            if let (image, _) = try? await generator.image(at: CMTime(seconds: t, preferredTimescale: 600)) {
-                let sig = signature(image)
-                let change: Double = last.map { difference($0, sig) } ?? 1
-                let sinceLast = t - (candidates.last?.time ?? -10)
-                if change > 0.035 || sinceLast >= 3 {
-                    candidates.append((t, image, sig, max(change, sinceLast >= 3 ? 0.035 : 0)))
-                    last = sig
-                }
-            }
+            times.append(CMTime(seconds: t, preferredTimescale: 600))
             t += interval
         }
+        var candidates: [(time: Double, change: Double)] = []
+        var last: [Double]?
+        for await result in sampler.images(for: times) {
+            guard let image = try? result.image else { continue }
+            let time = result.requestedTime.seconds
+            let sig = signature(image)
+            let change: Double = last.map { difference($0, sig) } ?? 1
+            let sinceLast = time - (candidates.last?.time ?? -10)
+            if change > 0.035 || sinceLast >= 3 {
+                candidates.append((time, max(change, sinceLast >= 3 ? 0.035 : 0)))
+                last = sig
+            }
+        }
         // Keep the most distinct frames, then restore chronological order.
-        let kept = candidates.sorted { $0.change > $1.change }.prefix(max(1, maxFrames)).sorted { $0.time < $1.time }
+        let kept = candidates.sorted { $0.change > $1.change }.prefix(max(1, maxFrames)).map(\.time).sorted()
 
+        // Pass 2: render only the kept frames at full size for OCR and snapshots.
+        let renderer = AVAssetImageGenerator(asset: asset)
+        renderer.appliesPreferredTrackTransform = true
+        renderer.maximumSize = CGSize(width: 1080, height: 1920)
+        renderer.requestedTimeToleranceBefore = tolerance
+        renderer.requestedTimeToleranceAfter = tolerance
         try FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
         var frames: [[String: Any]] = []
-        for frame in kept {
-            let file = (outDir as NSString).appendingPathComponent(String(format: "frame-%06.2f.jpg", frame.time))
-            try ImageFiles.writeJPEG(frame.image, to: file, quality: 0.82)
-            frames.append(["timeSec": frame.time, "path": file, "width": frame.image.width, "height": frame.image.height])
+        for await result in renderer.images(for: kept.map { CMTime(seconds: $0, preferredTimescale: 600) }) {
+            guard let image = try? result.image else { continue }
+            let time = result.requestedTime.seconds
+            let file = (outDir as NSString).appendingPathComponent(String(format: "frame-%06.2f.jpg", time))
+            try ImageFiles.writeJPEG(image, to: file, quality: 0.82)
+            frames.append(["timeSec": time, "path": file, "width": image.width, "height": image.height])
         }
         return ["durationSec": duration, "frames": frames]
     }
@@ -178,5 +198,32 @@ enum MediaService {
         try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
         try await session.export(to: out, as: .mp4)
         return ["path": outPath, "durationSec": asset.duration, "creationDate": asset.creationDate.map(isoFormatter.string(from:)) ?? NSNull()]
+    }
+}
+
+import NaturalLanguage
+
+extension MediaService {
+    /// Locales Apple speech recognition supports on this Mac, and whether each runs on-device.
+    static func supportedLocales() -> [[String: Any]] {
+        SFSpeechRecognizer.supportedLocales()
+            .map { locale -> [String: Any] in
+                let recognizer = SFSpeechRecognizer(locale: locale)
+                return [
+                    "id": locale.identifier.replacingOccurrences(of: "_", with: "-"),
+                    "name": Locale(identifier: "en_US").localizedString(forIdentifier: locale.identifier) ?? locale.identifier,
+                    "onDevice": recognizer?.supportsOnDeviceRecognition ?? false,
+                ]
+            }
+            .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
+    }
+
+    /// Dominant languages of a text (used as a hint for which speech locale to try first).
+    static func detectLanguage(text: String) -> [[String: Any]] {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        return recognizer.languageHypotheses(withMaximum: 3)
+            .sorted { $0.value > $1.value }
+            .map { ["language": $0.key.rawValue, "probability": $0.value] }
     }
 }

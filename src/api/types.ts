@@ -230,8 +230,11 @@ export interface ScreenshotDetail {
 export interface QueueSnapshot {
   running: boolean;
   paused: boolean;
+  mode: string;
+  runId: string | null;
   phase: string;
-  discovered: number;
+  inPhotos: number;
+  alreadyKnown: number;
   newlyDiscovered: number;
   total: number;
   processed: number;
@@ -280,6 +283,8 @@ export interface AppConfig {
   scanToYear: number | null;
   nearbyRadiusKm: number;
   transcriptionLocale: string;
+  autoProcessNewScreenshots: boolean;
+  screenshotFolders: string[];
   maxKeyframes: number;
   ytDlpPath: string;
   cookiesFromBrowser: string;
@@ -365,7 +370,15 @@ export interface Reel {
   processedAt: string | null;
   placeCount: number;
   openReviewCount: number;
+  stages: Partial<Record<ReelStage, { status: StageStatus; detail: string | null }>>;
+  transcriptLocaleOverride: string | null;
+  transcriptConfidence: number | null;
+  placesExtracted: number;
+  placesAutoResolved: number;
 }
+
+export type ReelStage = "caption" | "video" | "audio" | "transcript" | "keyframes" | "ocr" | "ai" | "places";
+export type StageStatus = "pending" | "running" | "done" | "skipped" | "failed";
 
 export interface ReelDetail {
   reel: Reel;
@@ -382,3 +395,68 @@ export interface PhotoVideo { id: string; creationDate: string | null; durationS
 export type LibraryItem =
   | { kind: "screenshot"; date: string | null; screenshot: Screenshot }
   | { kind: "reel"; date: string | null; reel: Reel };
+
+export type RunMode =
+  | { kind: "scanNew" }
+  | { kind: "validation"; count: number; random: boolean }
+  | { kind: "retry" }
+  | { kind: "scanFolder"; path: string };
+
+export interface SourceSummary { total?: number; known?: number; new?: number; error?: string }
+export interface ScanPreview { photos: SourceSummary; folders: { path: string; summary: SourceSummary }[] }
+
+export interface RunRecord {
+  id: string;
+  kind: string;
+  requested: number;
+  sample: string;
+  screenshotCount: number;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface RunRow {
+  screenshotId: string;
+  thumbnailPath: string | null;
+  creationDate: string | null;
+  status: ProcessingStatus;
+  statusDetail: string | null;
+  sourceType: SourceType;
+  travelConfidence: number;
+  escalationLevel: number;
+  places: string[];
+  placesExtracted: number;
+  placesAutoResolved: number;
+  ocrMs: number;
+  aiMs: number;
+  pipelineMs: number;
+  aiCost: number;
+}
+
+export interface RunReport {
+  run: RunRecord;
+  total: number;
+  processed: number;
+  travel: number;
+  notTravel: number;
+  failed: number;
+  needsReview: number;
+  waiting: number;
+  pending: number;
+  skippedLocally: number;
+  aiRequests: number;
+  placesFound: number;
+  placesExtracted: number;
+  placesAutoResolved: number;
+  resolutionRate: number;
+  avgOcrMs: number;
+  avgAiMs: number;
+  avgTotalMs: number;
+  totalCost: number;
+  costPerTravelScreenshot: number;
+  inputTokens: number;
+  outputTokens: number;
+  rows: RunRow[];
+}
+
+export interface SpeechLocale { id: string; name: string; onDevice: boolean; engine: string }

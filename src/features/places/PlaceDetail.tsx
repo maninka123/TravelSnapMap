@@ -197,7 +197,8 @@ function InfoCards({ facts, nearby, onDelete }: { facts: Fact[]; nearby: Detail[
     <div className="info-cards">
       {visible.map((card) => (
         <div key={card.key} className="info-card">
-          <h4>{card.title}</h4>
+          <h4 className="row"><span className="grow">{card.title}</span>
+            {sourceCount(card.facts) > 1 && <span className="muted small" title="Each source is kept separately; different advice is not merged">from {sourceCount(card.facts)} sources</span>}</h4>
           {card.facts.map((f, i) => {
             // For values that change (prices, hours), label the newest one.
             const sameTypeEarlier = TIME_SENSITIVE.has(f.type) && card.facts.slice(0, i).some((o) => o.type === f.type);
@@ -325,4 +326,8 @@ function AddToTripDialog({ placeId, onClose }: { placeId: string; onClose: () =>
       </form>
     </Modal>
   );
+}
+
+function sourceCount(facts: Fact[]): number {
+  return new Set(facts.map((f) => f.reelId ?? f.screenshotId ?? f.id)).size;
 }

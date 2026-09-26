@@ -84,6 +84,10 @@ impl PlaceRecord {
         })
     }
 
+    pub fn subtitle(&self) -> String {
+        [self.city.clone(), self.country.clone()].into_iter().flatten().collect::<Vec<_>>().join(", ")
+    }
+
     pub fn all_names(&self) -> Vec<String> {
         let mut v = vec![self.canonical_name.clone()];
         v.extend(self.alternative_names.iter().cloned());
@@ -415,6 +419,12 @@ pub struct ReelRecord {
     pub processed_at: Option<String>,
     pub place_count: i64,
     pub open_review_count: i64,
+    /// {"caption": {"status": "done", "detail": "…"}, …} — see `pipeline::reels::STAGES`.
+    pub stages: serde_json::Value,
+    pub transcript_locale_override: Option<String>,
+    pub transcript_confidence: Option<f64>,
+    pub places_extracted: i64,
+    pub places_auto_resolved: i64,
 }
 
 pub const REEL_COLUMNS: &str = "rl.id, rl.url, rl.shortcode, rl.creator, rl.caption, rl.posted_at, rl.media_path, rl.audio_path, \
@@ -422,7 +432,8 @@ pub const REEL_COLUMNS: &str = "rl.id, rl.url, rl.shortcode, rl.creator, rl.capt
     rl.travel_confidence, rl.transcript, rl.transcript_locale, rl.content_hash, rl.ai_model, rl.ai_prompt_version, \
     rl.ai_input_tokens, rl.ai_output_tokens, rl.ai_cost, rl.created_at, rl.processed_at, \
     (SELECT COUNT(*) FROM place_reels pr WHERE pr.reel_id = rl.id), \
-    (SELECT COUNT(*) FROM review_items r WHERE r.reel_id = rl.id AND r.is_resolved = 0)";
+    (SELECT COUNT(*) FROM review_items r WHERE r.reel_id = rl.id AND r.is_resolved = 0), \
+    rl.stages, rl.transcript_locale_override, rl.transcript_confidence, rl.places_extracted, rl.places_auto_resolved";
 
 impl ReelRecord {
     pub fn from_row(r: &Row) -> rusqlite::Result<Self> {
@@ -456,6 +467,11 @@ impl ReelRecord {
             processed_at: r.get(25)?,
             place_count: r.get(26)?,
             open_review_count: r.get(27)?,
+            stages: serde_json::from_str(&r.get::<_, String>(28)?).unwrap_or_default(),
+            transcript_locale_override: r.get(29)?,
+            transcript_confidence: r.get(30)?,
+            places_extracted: r.get(31)?,
+            places_auto_resolved: r.get(32)?,
         })
     }
 }

@@ -284,6 +284,9 @@ pub struct PlaceCandidate {
     pub map_identifier: Option<String>,
     #[serde(default)]
     pub category: Option<String>,
+    /// Distance from the centre of the searched area (city/country hint), when one was given.
+    #[serde(default)]
+    pub near_distance_km: Option<f64>,
     #[serde(default)]
     pub score: f64,
 }

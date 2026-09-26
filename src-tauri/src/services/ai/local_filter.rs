@@ -43,6 +43,14 @@ const KEYWORDS: &[&str] = &[
     "station", "airport", "train", "ferry", "cable car", "ropeway", "gondola", "sunrise", "sunset", "view",
     "km", "min walk", "closed", "open", "free entry", "reservation", "guesthouse", "old town", "neighbourhood",
     "neighborhood", "district", "rooftop", "skyline", "onsen", "hot spring", "cruise", "reviews", "¥", "€", "$",
+    "valley", "canyon", "gorge", "cave", "falls", "peak", "glacier", "river", "bay", "harbour", "harbor", "pagoda",
+    "village", "province", "scenic", "sightseeing", "attraction", "landmark", "tower", "bridge", "temple", "fort",
+    "foodie", "foodies", "cuisine", "dessert", "bakery", "buffet", "villa", "camping", "road trip",
+];
+/// Matched anywhere (also inside handles like @asiaodysseytravel) and in other scripts.
+const SUBSTRING_KEYWORDS: &[&str] = &[
+    "travel", "wanderlust", "itinerar", "backpack", "tourism",
+    "旅游", "旅行", "景区", "景点", "攻略", "酒店", "餐厅", "美食", "打卡", "観光", "ホテル", "温泉", "여행", "관광", "맛집", "호텔",
 ];
 const NEGATIVE: &[&str] = &[
     "func ", "import ", "error:", "warning:", "xcode", "terminal", "npm ", "git ", "stack trace", "exception",
@@ -69,7 +77,9 @@ const SOURCES: &[(SourceType, &[&str])] = &[
 pub fn analyze(ocr_text: &str) -> LocalReport {
     let lower = format!(" {} ", ocr_text.to_lowercase().replace('\n', " "));
     let strong: Vec<&str> = STRONG.iter().copied().filter(|k| lower.contains(k)).collect();
-    let hits: Vec<&str> = KEYWORDS.iter().copied().filter(|k| lower.contains(&format!(" {k}")) || (k.chars().count() == 1 && lower.contains(k))).collect();
+    let mut hits: Vec<&str> = KEYWORDS.iter().copied().filter(|k| lower.contains(&format!(" {k}")) || (k.chars().count() == 1 && lower.contains(k))).collect();
+    hits.extend(SUBSTRING_KEYWORDS.iter().copied().filter(|k| lower.contains(k)));
+    let has_address = has_street_address(&lower);
     let negative: Vec<&str> = NEGATIVE.iter().copied().filter(|k| lower.contains(k)).collect();
     let countries = text::countries_in(ocr_text);
     let source = detect_source(&lower);
@@ -82,6 +92,9 @@ pub fn analyze(ocr_text: &str) -> LocalReport {
     if ocr_text.contains('📍') {
         points += 3.0;
     }
+    if has_address {
+        points += 2.0;
+    }
     points += match source {
         SourceType::Booking | SourceType::Airbnb | SourceType::Tripadvisor => 4.0,
         SourceType::GoogleMaps | SourceType::AppleMaps => 2.0,
@@ -90,11 +103,12 @@ pub fn analyze(ocr_text: &str) -> LocalReport {
     points -= negative.len() as f64 * 2.0;
 
     let mut score = 1.0 - (-points.max(0.0) / 5.0).exp();
-    if text_length < 12 {
+    // Very short text is too little to judge — unless it already carries travel signals (CJK text is dense).
+    if text_length < 12 && strong.is_empty() && hits.is_empty() {
         score = score.min(0.15);
     }
 
-    let positive = strong.len() + hits.len() + countries.len();
+    let positive = strong.len() + hits.len() + countries.len() + usize::from(has_address);
     let not_travel_confidence = if negative.len() >= 2 && positive <= 1 {
         0.97
     } else if !negative.is_empty() && positive == 0 {
@@ -125,6 +139,16 @@ pub fn route(report: &LocalReport, has_large_photo: bool, config: &AppConfig) ->
         return Route::SkipNotTravel;
     }
     Route::AiText
+}
+
+/// "498, Negombo Rd", "12 Smith Street", "775B Ridgewood Avenue" — a number followed by a street word.
+fn has_street_address(lower: &str) -> bool {
+    const STREET: &[&str] = &["rd", "road", "st", "street", "ave", "avenue", "lane", "ln", "blvd", "boulevard", "dr", "drive", "hwy", "highway", "mawatha", "jalan", "soi", "straße", "strasse", "rue", "calle", "via"];
+    let words: Vec<&str> = lower.split(|c: char| c.is_whitespace() || c == ',').filter(|w| !w.is_empty()).collect();
+    words.windows(3).any(|w| {
+        let has_number = w[0].chars().next().is_some_and(|c| c.is_ascii_digit()) && w[0].chars().filter(|c| c.is_ascii_digit()).count() <= 5;
+        has_number && (STREET.contains(&w[2].trim_end_matches('.')) || STREET.contains(&w[1].trim_end_matches('.')))
+    })
 }
 
 fn detect_source(lower: &str) -> SourceType {
@@ -229,5 +253,29 @@ mod tests {
         let lines: Vec<String> = ["9:41", "Follow", "Fushimi Inari", "12.3K", "Go before 8am", "Reply"]
             .iter().map(|s| s.to_string()).collect();
         assert_eq!(content_lines(&lines), vec![2, 4]);
+    }
+}
+
+#[cfg(test)]
+mod recall_tests {
+    use super::*;
+
+    /// Cases taken from a real validation run that were wrongly skipped.
+    #[test]
+    fn real_false_negatives_now_reach_the_ai() {
+        let cfg = AppConfig::default();
+        let wangxian = analyze("1:31 / Asia Odyssey Trave / Wangxian Valley / asiaodysseytravel / Follow / Jiangxi really has an im");
+        assert_eq!(route(&wangxian, false, &cfg), Route::AiText, "score {}", wangxian.score);
+        let restaurant = analyze("12:05 / Reels • / Foodies Welcome / 15.4k / MAD MUNCH / 498, Negombo Rd, Walisara.");
+        assert_eq!(route(&restaurant, false, &cfg), Route::AiText, "score {}", restaurant.score);
+        let chinese = analyze("九寨沟景区 攻略 必去");
+        assert_eq!(route(&chinese, false, &cfg), Route::AiText);
+    }
+
+    #[test]
+    fn street_addresses() {
+        assert!(has_street_address("mad munch 498, negombo rd, walisara"));
+        assert!(has_street_address("12 smith street"));
+        assert!(!has_street_address("2,079 likes 147 comments"));
     }
 }

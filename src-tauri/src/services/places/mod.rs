@@ -26,7 +26,8 @@ pub enum PlaceError {
 /// A natural-language place search backend (Apple MapKit via the native bridge by default).
 #[async_trait]
 pub trait PlaceSearchProvider: Send + Sync {
-    async fn search(&self, query: &str) -> Result<Vec<PlaceCandidate>, PlaceError>;
+    /// `near` ("Kyoto, Japan" or "Japan") centres the search there instead of on the user's location.
+    async fn search(&self, query: &str, near: Option<&str>) -> Result<Vec<PlaceCandidate>, PlaceError>;
 }
 
 /// `PlaceService`: resolution with caching, throttling and multi-query fallbacks.
@@ -43,14 +44,24 @@ impl PlaceService {
             provider,
             cache: Mutex::new(HashMap::new()),
             last_request: Mutex::new(Instant::now() - Duration::from_secs(5)),
-            // MapKit throttles bursts; stay comfortably below its limit.
-            min_interval: Duration::from_millis(400),
+            // Apple Maps allows ~50 searches a minute (a "near" hint can add one more); stay below it.
+            min_interval: Duration::from_millis(1300),
         }
+    }
+
+    /// Overrides the spacing between provider requests (tests use zero).
+    pub fn with_min_interval(mut self, interval: Duration) -> Self {
+        self.min_interval = interval;
+        self
     }
 
     /// Cached, throttled raw search (also used for manual searches from the UI).
     pub async fn search(&self, query: &str) -> Result<Vec<PlaceCandidate>, PlaceError> {
-        let key = crate::text::normalize(query);
+        self.search_near(query, None).await
+    }
+
+    pub async fn search_near(&self, query: &str, near: Option<&str>) -> Result<Vec<PlaceCandidate>, PlaceError> {
+        let key = format!("{}|{}", crate::text::normalize(query), near.map(crate::text::normalize).unwrap_or_default());
         if let Some(hit) = self.cache.lock().await.get(&key) {
             return Ok(hit.clone());
         }
@@ -64,14 +75,24 @@ impl PlaceService {
                 }
                 *last = Instant::now();
             }
-            match self.provider.search(query).await {
-                Err(PlaceError::Throttled) if attempts == 0 => {
+            match self.provider.search(query, near).await {
+                Err(PlaceError::Throttled) if attempts < 2 => {
                     attempts += 1;
-                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    // Back off; the whole queue shares this limiter, so everyone waits together.
+                    let mut last = self.last_request.lock().await;
+                    tokio::time::sleep(Duration::from_secs(45 * attempts)).await;
+                    *last = Instant::now();
                 }
                 other => break other?,
             }
         };
+        // Show countries in English even when Maps returns a localised name.
+        let results: Vec<PlaceCandidate> = results.into_iter().map(|mut c| {
+            if let Some(name) = c.country_code.as_deref().and_then(crate::text::country_name) {
+                c.country = Some(name.to_string());
+            }
+            c
+        }).collect();
         self.cache.lock().await.insert(key, results.clone());
         Ok(results)
     }
@@ -83,11 +104,29 @@ impl PlaceService {
             queries.push(format!("{}, {}", place.display_name, country));
         }
         queries.push(place.display_name.clone());
+        // Local-language names (e.g. 望仙谷) often work better in that country's map data.
+        for alt in place.alternative_names.clone().unwrap_or_default().into_iter().filter(|a| !a.trim().is_empty()).take(2) {
+            queries.push(alt);
+        }
         queries.dedup();
 
+        // Centre the search on the place's own city/country (not the user's location).
+        let area = place.city.as_deref().or(place.region.as_deref());
+        let near = match (area.map(str::trim).filter(|c| !c.is_empty()), place.country.as_deref().map(str::trim).filter(|c| !c.is_empty())) {
+            (Some(city), Some(country)) => Some(format!("{city}, {country}")),
+            (Some(city), None) => Some(city.to_string()),
+            (None, Some(country)) => Some(country.to_string()),
+            _ => None,
+        };
         let mut fallback: Option<PlaceResolutionResult> = None;
-        for query in queries {
-            let results = self.search(&query).await?;
+        for (index, query) in queries.into_iter().enumerate() {
+            // A usable candidate after two query variants is enough: stop early to save Maps calls.
+            if index >= 2 && fallback.as_ref().is_some_and(|f| f.decision == Decision::Review) {
+                break;
+            }
+            let results = self.search_near(&query, near.as_deref()).await?;
+            // A country or continent is never a pin.
+            let results: Vec<PlaceCandidate> = results.into_iter().filter(|c| !crate::text::is_country_or_continent(&c.name)).collect();
             if results.is_empty() {
                 continue;
             }

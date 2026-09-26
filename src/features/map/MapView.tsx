@@ -1,6 +1,7 @@
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppService, PhotoLibraryService, ProcessingService } from "../../api/services";
+import { AppService, PhotoLibraryService } from "../../api/services";
+import { ScanControls } from "../../components/ScanControls";
 import { PlaceService } from "../../api/services";
 import type { Place, PlaceCategory, PersonalStatus } from "../../api/types";
 import { CategoryChip, PlaceLine, StatusBadge, Thumb } from "../../components/common";
@@ -216,11 +217,9 @@ function Onboarding() {
         <span className="step-num">3</span>
         <div className="grow">
           <div className="strong">Scan screenshots</div>
-          <div className="muted small">Runs in the background; you can pause any time. Or import an Instagram Reel from Sources.</div>
+          <div className="muted small">Only screenshots you haven't processed yet. Runs in the background; pause any time. Tip: try a small test run from Sources first.</div>
+          <div className="row wrap" style={{ marginTop: 8 }}>{!scanning && <ScanControls compact />}{scanning && <span className="muted">Scanning…</span>}</div>
         </div>
-        <button className="btn primary" disabled={!granted || scanning} onClick={() => ProcessingService.start(true)}>
-          {scanning ? "Scanning…" : "Start"}
-        </button>
       </div>
     </div>
   );

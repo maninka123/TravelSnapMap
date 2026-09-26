@@ -104,14 +104,14 @@ export function pct(v: number): string {
 
 /** Place page information cards. Only cards with facts are shown; each fact keeps its source. */
 export const INFO_CARDS: { key: string; title: string; types: TravelFactType[] }[] = [
-  { key: "time", title: "🕐 Best Time", types: ["recommendedTime", "bestSeason"] },
+  { key: "time", title: "🕐 Best Time", types: ["recommendedTime", "bestSeason", "openingHours", "duration"] },
   { key: "getting", title: "🚆 Getting There", types: ["transportation", "route"] },
   { key: "cost", title: "🎟 Tickets & Cost", types: ["price", "ticket", "reservation"] },
   { key: "food", title: "🍜 Food", types: ["food"] },
   { key: "photo", title: "📸 Photography", types: ["photography"] },
   { key: "todo", title: "🎯 Things To Do", types: ["activity"] },
   { key: "stay", title: "🏨 Stay", types: ["accommodation"] },
-  { key: "know", title: "⚠️ Things To Know", types: ["warning", "openingHours", "duration", "accessibility"] },
+  { key: "warnings", title: "⚠️ Warnings", types: ["warning", "accessibility"] },
   { key: "tips", title: "💡 Local Tips", types: ["generalTip", "other"] },
   { key: "nearby", title: "📍 Nearby Places", types: ["nearby"] },
   { key: "itinerary", title: "🗓 Itinerary", types: ["itinerary"] },

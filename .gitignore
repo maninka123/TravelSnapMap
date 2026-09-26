@@ -16,3 +16,4 @@ src-tauri/binaries/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+*.tsbuildinfo

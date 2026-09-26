@@ -9,6 +9,7 @@
 
 import Foundation
 
+Responsibility.disclaimIfNeeded()
 let output = OutputWriter()
 
 func handle(_ method: String, _ params: [String: Any]) async throws -> Any {
@@ -44,8 +45,12 @@ func handle(_ method: String, _ params: [String: Any]) async throws -> Any {
         return try await MediaService.extractAudio(path: try params.string("path"), outPath: try params.string("outPath"))
     case "speech.authorization":
         return await MediaService.speechAuthorization()
+    case "speech.supportedLocales":
+        return await SpeechService.supportedLocales()
+    case "text.detectLanguage":
+        return MediaService.detectLanguage(text: params["text"] as? String ?? "")
     case "speech.transcribe":
-        return try await MediaService.transcribe(path: try params.string("path"), locale: params["locale"] as? String ?? "en-US")
+        return try await SpeechService.transcribe(path: try params.string("path"), locale: params["locale"] as? String ?? "en-US")
     case "video.keyframes":
         return try await MediaService.keyframes(
             path: try params.string("path"), outDir: try params.string("outDir"),
@@ -55,7 +60,7 @@ func handle(_ method: String, _ params: [String: Any]) async throws -> Any {
     case "photos.exportVideo":
         return try await MediaService.exportVideo(id: try params.string("id"), outPath: try params.string("outPath"))
     case "maps.search":
-        return try await MapsService.search(query: try params.string("query"), limit: params["limit"] as? Int ?? 8)
+        return try await MapsService.search(query: try params.string("query"), limit: params["limit"] as? Int ?? 8, near: params["near"] as? String)
     default:
         throw BridgeError.message("Unknown method \(method)")
     }

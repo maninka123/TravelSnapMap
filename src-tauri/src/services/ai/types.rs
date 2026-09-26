@@ -202,8 +202,10 @@ pub struct AiResult<T> {
 pub enum AiError {
     #[error("No DeepSeek API key is configured. Add DEEPSEEK_API_KEY to .env.local or save one in Settings.")]
     NotConfigured,
-    #[error("No network connection — the screenshot will be processed when you're back online.")]
+    #[error("No network connection — it will be processed automatically when you're back online.")]
     Offline,
+    #[error("DeepSeek didn't respond in time — it will be retried automatically.")]
+    Timeout,
     #[error("DeepSeek rate limit reached")]
     RateLimited,
     #[error("Today's AI request limit has been reached")]
@@ -214,12 +216,14 @@ pub enum AiError {
     InvalidResponse,
     #[error("DeepSeek returned invalid JSON: {0}")]
     InvalidJson(String),
+    #[error("DeepSeek response was cut off at the output limit")]
+    Truncated,
 }
 
 impl AiError {
     /// Errors that park the screenshot until later rather than failing it.
     pub fn is_transient(&self) -> bool {
-        matches!(self, AiError::Offline | AiError::RateLimited | AiError::DailyLimitReached)
+        matches!(self, AiError::Offline | AiError::Timeout | AiError::RateLimited | AiError::DailyLimitReached)
     }
 }
 
@@ -229,7 +233,13 @@ pub fn decode_json<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, A
     if text.starts_with("```") {
         text = text.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
     }
-    serde_json::from_str(text).map_err(|e| AiError::InvalidJson(e.to_string()))
+    // Take the first complete JSON value; models occasionally append stray text after it.
+    let first: serde_json::Value = serde_json::Deserializer::from_str(text)
+        .into_iter::<serde_json::Value>()
+        .next()
+        .ok_or_else(|| AiError::InvalidJson("empty response".into()))?
+        .map_err(|e| AiError::InvalidJson(e.to_string()))?;
+    serde_json::from_value(first).map_err(|e| AiError::InvalidJson(e.to_string()))
 }
 
 #[cfg(test)]
@@ -289,5 +299,17 @@ mod tests {
         let e: TravelClassification =
             decode_json("```json\n{\"is_travel_related\": true, \"confidence\": 0.7}\n```").unwrap();
         assert!(e.is_travel_related);
+    }
+}
+
+#[cfg(test)]
+mod real_json_cases {
+    use super::*;
+
+    /// Real case: the model appended text after a valid JSON object.
+    #[test]
+    fn trailing_text_after_json_is_ignored() {
+        let e: TravelExtraction = decode_json("{\"is_travel_related\": false, \"travel_confidence\": 0.1}\n\nNote: no places.").unwrap();
+        assert!(!e.is_travel_related);
     }
 }

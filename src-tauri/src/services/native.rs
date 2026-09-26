@@ -69,6 +69,8 @@ pub struct WordTiming {
     pub start: f64,
     #[serde(default)]
     pub duration: f64,
+    #[serde(default)]
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,6 +81,26 @@ pub struct Transcription {
     pub on_device: bool,
     #[serde(default)]
     pub locale: String,
+    #[serde(default)]
+    pub engine: String,
+}
+
+impl Transcription {
+    /// Mean word confidence (0 when there are no words).
+    pub fn confidence(&self) -> f64 {
+        if self.words.is_empty() { 0.0 } else { self.words.iter().map(|w| w.confidence).sum::<f64>() / self.words.len() as f64 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechLocale {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub on_device: bool,
+    #[serde(default)]
+    pub engine: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,6 +133,10 @@ pub trait MediaService: Send + Sync {
     /// Visually distinct frames only (never every frame). Returns (duration, frames).
     async fn keyframes(&self, video: &Path, out_dir: &Path, max_frames: u32) -> Result<(f64, Vec<FrameInfo>)>;
     async fn list_videos(&self, limit: u32) -> Result<Vec<PhotoVideo>>;
+    /// Locales Apple speech recognition supports on this Mac.
+    async fn speech_locales(&self) -> Result<Vec<SpeechLocale>>;
+    /// Language hypotheses (BCP-47 language, probability) for a text.
+    async fn detect_language(&self, text: &str) -> Result<Vec<(String, f64)>>;
     /// Exports a Photos video to `out`. Returns its creation date if known.
     async fn export_video(&self, asset_id: &str, out: &Path) -> Result<Option<String>>;
 }
@@ -315,8 +341,8 @@ impl VisionService for NativeBridge {
 /// Apple MapKit search via the bridge.
 #[async_trait]
 impl PlaceSearchProvider for NativeBridge {
-    async fn search(&self, query: &str) -> Result<Vec<PlaceCandidate>, PlaceError> {
-        match self.call("maps.search", json!({"query": query, "limit": 8}), SHORT).await {
+    async fn search(&self, query: &str, near: Option<&str>) -> Result<Vec<PlaceCandidate>, PlaceError> {
+        match self.call("maps.search", json!({"query": query, "limit": 8, "near": near}), SHORT).await {
             Ok(v) => serde_json::from_value(v).map_err(|e| PlaceError::Unavailable(e.to_string())),
             Err(e) if e.to_string().contains("throttled") => Err(PlaceError::Throttled),
             Err(e) => Err(PlaceError::Unavailable(e.to_string())),
@@ -347,6 +373,18 @@ impl MediaService for NativeBridge {
     async fn list_videos(&self, limit: u32) -> Result<Vec<PhotoVideo>> {
         let v = self.call("photos.listVideos", json!({"limit": limit}), SHORT).await?;
         Ok(serde_json::from_value(v)?)
+    }
+
+    async fn speech_locales(&self) -> Result<Vec<SpeechLocale>> {
+        let v = self.call("speech.supportedLocales", json!({}), SHORT).await?;
+        Ok(serde_json::from_value(v)?)
+    }
+
+    async fn detect_language(&self, text: &str) -> Result<Vec<(String, f64)>> {
+        let v = self.call("text.detectLanguage", json!({"text": text}), SHORT).await?;
+        Ok(v.as_array().cloned().unwrap_or_default().iter()
+            .filter_map(|h| Some((h["language"].as_str()?.to_string(), h["probability"].as_f64()?)))
+            .collect())
     }
 
     async fn export_video(&self, asset_id: &str, out: &Path) -> Result<Option<String>> {
