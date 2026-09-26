@@ -1,11 +1,12 @@
 import maplibregl from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PlaceService, TripService } from "../../api/services";
-import type { Fact, Place, PlaceDetail as Detail } from "../../api/types";
+import type { Fact, Place, PlaceDetail as Detail, PlaceWarning } from "../../api/types";
 import { ErrorNote, Modal, PlaceLine, PlaceSearchDialog, Pill, Thumb } from "../../components/common";
 import { CATEGORY, FACT, formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { MAP_STYLE } from "../map/MapView";
+import { MyVisit } from "./MyVisit";
 
 export function PlaceDetail({ id }: { id: string }) {
   const nav = useNav();
@@ -52,13 +53,18 @@ export function PlaceDetail({ id }: { id: string }) {
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
 
+      <Warnings warnings={data.warnings} />
+
       <MiniMap place={place} />
 
       <WhySaved detail={data} />
 
+      <div className="section"><h3>My visit</h3>{place.visitedAt && <span className="muted small">{formatDate(place.visitedAt)}</span>}</div>
+      <MyVisit place={place} memories={data.memories} />
+
       <div className="section"><h3>Saved information</h3></div>
       <div className="disclaimer">Saved from your screenshots and Reels — it may be out of date, and nothing here comes from an external database.</div>
-      <InfoCards facts={data.facts} nearby={data.nearby} onDelete={(f) => action.run(() => PlaceService.deleteFact(f.id))} />
+      <InfoCards facts={data.facts} nearby={data.nearby} warned={new Set(data.warnings.flatMap((w) => w.factIds))} onDelete={(f) => action.run(() => PlaceService.deleteFact(f.id))} />
 
       {data.images.length > 0 && (
         <>
@@ -126,6 +132,25 @@ export function PlaceDetail({ id }: { id: string }) {
   );
 }
 
+/** Freshness and disagreement warnings, shown before the details so they're seen when planning. */
+function Warnings({ warnings }: { warnings: PlaceWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="warnings-panel">
+      <div className="warnings-head">⚠️ Before you go <span className="muted small">— check these, your saved info may be out of date</span></div>
+      {warnings.map((w, i) => (
+        <div key={i} className={`warning-row warning-${w.kind}`}>
+          <span className="warning-icon">{w.kind === "stale" ? "🕰️" : "↔️"}</span>
+          <div>
+            <div className="strong">{w.title}</div>
+            <div className="muted small">{w.detail}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EditableName({ place, onSave }: { place: Place; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(place.canonicalName);
@@ -182,7 +207,7 @@ function WhySaved({ detail }: { detail: Detail }) {
 }
 
 /** Groups facts into cards; contradictions stay side by side, each with its own source. */
-function InfoCards({ facts, nearby, onDelete }: { facts: Fact[]; nearby: Detail["nearby"]; onDelete: (f: Fact) => void }) {
+function InfoCards({ facts, nearby, warned, onDelete }: { facts: Fact[]; nearby: Detail["nearby"]; warned: Set<string>; onDelete: (f: Fact) => void }) {
   const nav = useNav();
   const cards = useMemo(() => INFO_CARDS.map((card) => ({
     ...card,
@@ -208,6 +233,7 @@ function InfoCards({ facts, nearby, onDelete }: { facts: Fact[]; nearby: Detail[
                   <div className="fact-text grow">
                     {TIME_SENSITIVE.has(f.type) && card.facts.filter((o) => o.type === f.type).length > 1 &&
                       <Pill tone={sameTypeEarlier ? "muted" : "ok"}>{sameTypeEarlier ? "Earlier" : "Latest saved"}</Pill>}{" "}
+                    {warned.has(f.id) && <span title="See “Before you go” above">⚠️ </span>}
                     {f.text}
                   </div>
                   <button className="icon-btn fact-actions" title="Delete this fact" onClick={() => onDelete(f)}>🗑</button>

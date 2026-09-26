@@ -24,7 +24,7 @@ pub struct BackupSummary {
 }
 
 /// Folders inside the app data directory that hold irreplaceable-or-slow-to-rebuild files.
-const INCLUDED_DIRS: &[&str] = &["crops", "thumbnails", "reels"];
+const INCLUDED_DIRS: &[&str] = &["crops", "thumbnails", "reels", "memories"];
 /// Large files that can be re-downloaded or regenerated (Reel videos; the full-size screenshot cache).
 const EXCLUDED_FILE_NAMES: &[&str] = &["video.mp4"];
 
@@ -119,6 +119,7 @@ fn restore_instructions(data_dir: &Path) -> String {
         "TravelSnapMap backup\n====================\n\n\
          Contents\n  travelsnapmap.sqlite  your library (places, facts, screenshots, Reels, trips, settings)\n\
          \x20 files/crops           place photos cut from screenshots\n  files/thumbnails      screenshot thumbnails\n\
+         \x20 files/memories        your own photos attached to visited places\n\
          \x20 files/reels           Reel audio, key snapshots and covers (videos are not included)\n\
          \x20 config.json           app settings\n\n\
          Not included: your DeepSeek API key (it stays in the macOS Keychain), Reel videos and the full-size\n\

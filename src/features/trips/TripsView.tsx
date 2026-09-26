@@ -44,6 +44,8 @@ export function TripsView() {
 function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
   const nav = useNav();
   const { data: entries = [] } = useLoad(() => TripService.entries(trip.id), [trip.id]);
+  const { data: allWarnings = {} } = useLoad(() => PlaceService.warnings(), []);
+  const tripWarnings = entries.filter((e) => allWarnings[e.place.id]).map((e) => ({ entry: e, warnings: allWarnings[e.place.id] }));
   const action = useAction();
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: trip.name, start: trip.startDate ?? "", end: trip.endDate ?? "", notes: trip.notes });
@@ -79,6 +81,22 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
         {byCity.map(([city, n]) => <span key={city} className="chip-btn">{city} · {n}</span>)}
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
+      {tripWarnings.length > 0 && (
+        <details className="warnings-panel trip-warnings" open={tripWarnings.length <= 3 || undefined}>
+          <summary className="warnings-head">
+            ⚠️ Check before you go <span className="muted small">— {tripWarnings.length} place{tripWarnings.length === 1 ? " has" : "s have"} out-of-date or conflicting saved info</span>
+          </summary>
+          {tripWarnings.map(({ entry, warnings }) => (
+            <div key={entry.id} className="warning-row" onClick={() => nav.openPlace(entry.place.id)} role="button">
+              <span className="warning-icon">{warnings.some((w) => w.kind === "conflict") ? "↔️" : "🕰️"}</span>
+              <div>
+                <div className="strong">{entry.place.canonicalName}</div>
+                <div className="muted small">{warnings.map((w) => w.title).join(" · ")}</div>
+              </div>
+            </div>
+          ))}
+        </details>
+      )}
       {entries.length === 0 ? <Empty icon="🧳" title="No places in this trip yet" /> : byDay.map(([day, items]) => (
         <div key={day} style={{ marginBottom: 16 }}>
           <h4 style={{ marginBottom: 6 }}>{day}</h4>
@@ -87,7 +105,7 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
               <div key={e.id} className="list-row">
                 <Thumb path={e.place.heroImagePath ?? e.place.thumbnailPath} />
                 <div className="grow" onClick={() => nav.openPlace(e.place.id)}>
-                  <div className="strong">{e.place.canonicalName}</div>
+                  <div className="strong">{e.place.canonicalName}{allWarnings[e.place.id] && <span className="warn-dot" title={allWarnings[e.place.id].map((w) => w.title).join("\n")}> ⚠️</span>}</div>
                   <PlaceLine place={e.place} />
                 </div>
                 <CategoryChip category={e.place.category} />

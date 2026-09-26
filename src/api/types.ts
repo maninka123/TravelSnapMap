@@ -54,6 +54,11 @@ export interface Place {
   sourceCount: number;
   heroImagePath: string | null;
   thumbnailPath: string | null;
+  /** After the trip: when you went (YYYY-MM-DD), your own notes, your own photo as cover. */
+  visitedAt: string | null;
+  visitNotes: string;
+  coverMemoryId: string | null;
+  memoryCount: number;
 }
 
 export interface Screenshot {
@@ -215,6 +220,8 @@ export interface PlaceDetail {
   reels: Reel[];
   nearby: { place: Place; distanceKm: number }[];
   trips: Trip[];
+  memories: Memory[];
+  warnings: PlaceWarning[];
 }
 
 export interface ScreenshotDetail {
@@ -467,6 +474,8 @@ export interface Pricing {
   offPeak: Rates;
   peakHoursUtc: [number, number][];
   source: string;
+  /** Prices typed by the user; otherwise the model's standard prices are used automatically. */
+  custom: boolean;
 }
 
 /** Estimated AI spend so far under a pricing setting, with every mode for comparison. */
@@ -484,4 +493,44 @@ export interface CostSummary {
   screenshotsRemaining: number;
   per100Screenshots: number;
   projectedRemaining: number;
+}
+
+/** Smart Search: how the query was understood, and the matching places with the facts that matched. */
+export interface SearchChip {
+  kind: "country" | "city" | "category" | "source" | "creator" | "status" | "concept" | "term";
+  label: string;
+  emoji: string | null;
+  code: string | null;
+}
+export interface SearchHit { place: Place; matches: Fact[]; score: number }
+export interface SmartSearchResult { chips: SearchChip[]; hits: SearchHit[] }
+
+/** "Ticket price saved 18 months ago", "Two sources give different opening times"… */
+export interface PlaceWarning {
+  kind: "stale" | "conflict";
+  title: string;
+  detail: string;
+  factIds: string[];
+}
+
+/** One of your own photos attached to a visited place (the original stays in Photos). */
+export interface Memory {
+  id: string;
+  placeId: string;
+  photosId: string;
+  takenAt: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  imagePath: string | null;
+  thumbnailPath: string | null;
+  createdAt: string;
+}
+
+/** A photo in your Photos library (not a screenshot), offered for "My visit". */
+export interface OwnPhoto {
+  id: string;
+  creationDate: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  distanceM?: number | null;
 }

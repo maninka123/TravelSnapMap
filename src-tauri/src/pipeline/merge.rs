@@ -235,6 +235,12 @@ pub fn merge_places(db: &Database, source_id: &str, target_id: &str) -> Result<(
         )?;
         tx.execute("UPDATE travel_facts SET place_id = ?2 WHERE place_id = ?1", params![source_id, target_id])?;
         tx.execute("UPDATE place_images SET place_id = ?2 WHERE place_id = ?1", params![source_id, target_id])?;
+        tx.execute("UPDATE OR IGNORE place_memories SET place_id = ?2 WHERE place_id = ?1", params![source_id, target_id])?;
+        tx.execute(
+            "UPDATE places SET visited_at = COALESCE(visited_at, (SELECT visited_at FROM places WHERE id = ?1)), \
+             visit_notes = CASE WHEN visit_notes = '' THEN (SELECT visit_notes FROM places WHERE id = ?1) ELSE visit_notes END WHERE id = ?2",
+            params![source_id, target_id],
+        )?;
         tx.execute(
             "INSERT OR IGNORE INTO trip_places(id, trip_id, place_id, position, day) SELECT id || '-m', trip_id, ?2, position, day FROM trip_places WHERE place_id = ?1",
             params![source_id, target_id],

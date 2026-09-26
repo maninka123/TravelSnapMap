@@ -33,6 +33,20 @@ pub struct AssetInfo {
     pub height: i64,
 }
 
+/// One of your own photos (not a screenshot), for attaching to a visited place.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnPhoto {
+    pub id: String,
+    pub creation_date: Option<String>,
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    #[serde(default)]
+    pub distance_m: Option<f64>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct OcrBlockData {
     pub text: String,
@@ -56,6 +70,18 @@ pub trait PhotoLibraryService: Send + Sync {
     async fn crop_image(&self, source: &Path, dest: &Path, rect: Rect, max_pixel_size: u32) -> Result<()>;
     /// Emits `photosLibraryChanged` on the event channel when screenshots may have been added.
     async fn observe_new_screenshots(&self) -> Result<()>;
+    /// Your own photos taken within `radius_km` of a point (for "My visit").
+    async fn photos_near(&self, _lat: f64, _lon: f64, _radius_km: f64, _limit: u32) -> Result<Vec<OwnPhoto>> {
+        anyhow::bail!("Not available")
+    }
+    /// Your own photos taken between two days (YYYY-MM-DD, inclusive).
+    async fn photos_between(&self, _from: &str, _to: &str, _limit: u32) -> Result<Vec<OwnPhoto>> {
+        anyhow::bail!("Not available")
+    }
+    /// Small square-ish preview of any Photos asset.
+    async fn thumbnail(&self, _asset_id: &str, _path: &Path, _size: u32) -> Result<()> {
+        anyhow::bail!("Not available")
+    }
 }
 
 #[async_trait]
@@ -306,6 +332,21 @@ impl PhotoLibraryService for NativeBridge {
 
     async fn observe_new_screenshots(&self) -> Result<()> {
         self.call("photos.observe", json!({}), SHORT).await?;
+        Ok(())
+    }
+
+    async fn photos_near(&self, lat: f64, lon: f64, radius_km: f64, limit: u32) -> Result<Vec<OwnPhoto>> {
+        let v = self.call("photos.listNear", json!({"latitude": lat, "longitude": lon, "radiusKm": radius_km, "limit": limit}), Duration::from_secs(120)).await?;
+        Ok(serde_json::from_value(v)?)
+    }
+
+    async fn photos_between(&self, from: &str, to: &str, limit: u32) -> Result<Vec<OwnPhoto>> {
+        let v = self.call("photos.listBetween", json!({"from": from, "to": to, "limit": limit}), Duration::from_secs(60)).await?;
+        Ok(serde_json::from_value(v)?)
+    }
+
+    async fn thumbnail(&self, asset_id: &str, path: &Path, size: u32) -> Result<()> {
+        self.call("photos.thumbnail", json!({"id": asset_id, "path": path, "size": size}), EXPORT_TIMEOUT).await?;
         Ok(())
     }
 }

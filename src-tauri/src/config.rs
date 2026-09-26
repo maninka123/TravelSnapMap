@@ -98,6 +98,9 @@ pub struct Pricing {
     pub peak_hours_utc: Vec<(u32, u32)>,
     /// Where these numbers came from, shown in Settings.
     pub source: String,
+    /// The user typed their own prices (Settings → Advanced). Otherwise the model's standard prices
+    /// are applied automatically on every launch, so updated defaults reach existing installs.
+    pub custom: bool,
 }
 
 impl Default for Pricing {
@@ -109,6 +112,7 @@ impl Default for Pricing {
             off_peak: Rates { input_cache_hit: 0.003, input_cache_miss: 0.15, output: 0.60 },
             peak_hours_utc: vec![(1, 4), (6, 10)],
             source: "deepseek-flash official pricing, checked 2026-09-26".into(),
+            custom: false,
         }
     }
 }
@@ -194,6 +198,10 @@ impl AppConfig {
         if self.config_version < 3 {
             // The old single-rate prices were wrong (output was ~4x too low): use the official rates.
             self.pricing = Pricing::default();
+        }
+        if !self.pricing.custom {
+            // Standard prices always come from the built-in model pricing; only the billing mode is a choice.
+            self.pricing = Pricing { mode: self.pricing.mode.clone(), ..Pricing::default() };
         }
         self.config_version = CONFIG_VERSION;
         self

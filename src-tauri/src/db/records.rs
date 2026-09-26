@@ -39,6 +39,11 @@ pub struct PlaceRecord {
     pub source_count: i64,
     pub hero_image_path: Option<String>,
     pub thumbnail_path: Option<String>,
+    // After the trip
+    pub visited_at: Option<String>,
+    pub visit_notes: String,
+    pub cover_memory_id: Option<String>,
+    pub memory_count: i64,
 }
 
 pub const PLACE_COLUMNS: &str = "p.id, p.canonical_name, p.alternative_names, p.map_identifier, p.latitude, p.longitude, \
@@ -46,11 +51,13 @@ pub const PLACE_COLUMNS: &str = "p.id, p.canonical_name, p.alternative_names, p.
     p.personal_status, p.notes, p.summary_text, p.summary_fact_ids, p.summary_generated_at, p.hero_image_id, \
     p.created_at, p.updated_at, \
     (SELECT COUNT(*) FROM place_screenshots ps WHERE ps.place_id = p.id) + (SELECT COUNT(*) FROM place_reels pr WHERE pr.place_id = p.id), \
-    COALESCE((SELECT i.image_path FROM place_images i WHERE i.id = p.hero_image_id AND i.is_accepted = 1), \
+    COALESCE((SELECT m.image_path FROM place_memories m WHERE m.id = p.cover_memory_id), \
+             (SELECT i.image_path FROM place_images i WHERE i.id = p.hero_image_id AND i.is_accepted = 1), \
              (SELECT i.image_path FROM place_images i WHERE i.place_id = p.id AND i.is_accepted = 1 ORDER BY i.quality_score DESC LIMIT 1)), \
     COALESCE((SELECT s.thumbnail_path FROM place_screenshots ps JOIN screenshots s ON s.id = ps.screenshot_id \
        WHERE ps.place_id = p.id AND s.thumbnail_path IS NOT NULL ORDER BY s.creation_date DESC LIMIT 1), \
-    (SELECT rl.thumbnail_path FROM place_reels pr JOIN reels rl ON rl.id = pr.reel_id WHERE pr.place_id = p.id AND rl.thumbnail_path IS NOT NULL LIMIT 1))";
+    (SELECT rl.thumbnail_path FROM place_reels pr JOIN reels rl ON rl.id = pr.reel_id WHERE pr.place_id = p.id AND rl.thumbnail_path IS NOT NULL LIMIT 1)), \
+    p.visited_at, p.visit_notes, p.cover_memory_id, (SELECT COUNT(*) FROM place_memories m WHERE m.place_id = p.id)";
 
 impl PlaceRecord {
     pub fn from_row(r: &Row) -> rusqlite::Result<Self> {
@@ -81,6 +88,10 @@ impl PlaceRecord {
             source_count: r.get(23)?,
             hero_image_path: r.get(24)?,
             thumbnail_path: r.get(25)?,
+            visited_at: r.get(26)?,
+            visit_notes: r.get(27)?,
+            cover_memory_id: r.get(28)?,
+            memory_count: r.get(29)?,
         })
     }
 

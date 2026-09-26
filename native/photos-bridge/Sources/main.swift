@@ -28,6 +28,14 @@ func handle(_ method: String, _ params: [String: Any]) async throws -> Any {
         return try await PhotosService.exportImage(
             id: try params.string("id"), path: try params.string("path"),
             maxPixelSize: params["maxPixelSize"] as? Int ?? 2048, quality: params["quality"] as? Double ?? 0.85)
+    case "photos.listNear":
+        return try PhotosService.listNear(
+            latitude: params.double("latitude"), longitude: params.double("longitude"),
+            radiusKm: params["radiusKm"] as? Double ?? 1.0, limit: params["limit"] as? Int ?? 300)
+    case "photos.listBetween":
+        return try PhotosService.listBetween(from: try params.string("from"), to: try params.string("to"), limit: params["limit"] as? Int ?? 300)
+    case "photos.thumbnail":
+        return try await PhotosService.thumbnail(id: try params.string("id"), path: try params.string("path"), size: params["size"] as? Int ?? 360)
     case "photos.observe":
         PhotosService.startObserving { output.event("photosLibraryChanged") }
         return ["observing": true]

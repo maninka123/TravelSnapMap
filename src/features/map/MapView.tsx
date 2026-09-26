@@ -4,8 +4,11 @@ import { AppService, PhotoLibraryService } from "../../api/services";
 import { ScanControls } from "../../components/ScanControls";
 import { PlaceService } from "../../api/services";
 import type { Place, PlaceCategory, PersonalStatus } from "../../api/types";
-import { CategoryChip, Flag, PlaceLine, StatusBadge, Thumb } from "../../components/common";
+import { Flag, Thumb } from "../../components/common";
+import { MatchSnippet, SEARCH_EXAMPLES, SearchChips, useSmartSearch } from "../../components/SmartSearch";
 import { CATEGORY, STATUS } from "../../lib/labels";
+import { openUrl } from "../../lib/open";
+import { QuickAddPlace } from "../places/QuickAddPlace";
 import { useLoad, useNav } from "../../lib/nav";
 
 /** Free vector basemap (no API key). Swap the style URL to change providers. */
@@ -20,19 +23,26 @@ export function MapView() {
   const [country, setCountry] = useState("");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Place>();
+  const [adding, setAdding] = useState(false);
+  const [showResults, setShowResults] = useState(true);
+  const { result: smart, busy: searching } = useSmartSearch(search, true);
+  const hitIds = useMemo(() => (smart ? new Set(smart.hits.map((h) => h.place.id)) : undefined), [smart]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | undefined>(undefined);
   const placesRef = useRef<Place[]>([]);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    return places.filter((p) =>
-      (!category || p.category === category) &&
-      (!status || p.personalStatus === status) &&
-      (!country || p.countryCode === country) &&
-      (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q)));
-  }, [places, category, status, country, search]);
+  const filtered = useMemo(() => places.filter((p) =>
+    (!category || p.category === category) &&
+    (!status || p.personalStatus === status) &&
+    (!country || p.countryCode === country) &&
+    (!hitIds || hitIds.has(p.id))), [places, category, status, country, hitIds]);
+
+  // Zoom to the results of each new search.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && smart && smart.hits.length > 0) fit(map, smart.hits.map((h) => h.place));
+  }, [smart]);
 
   const countries = useMemo(() => {
     const counts = new Map<string, { code: string; name: string; count: number }>();
@@ -117,7 +127,12 @@ export function MapView() {
       <div ref={containerRef} className="map" />
       <div className="map-overlay">
         <div className="map-filters">
-          <input placeholder="Search places…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 200 }} />
+          <div className="smart-search-field">
+            <span className="smart-search-icon">{searching ? "…" : "🔎"}</span>
+            <input placeholder="Ask your map — e.g. “sunrise spots in Japan”" value={search}
+                   onChange={(e) => { setSearch(e.target.value); setShowResults(true); }} onFocus={() => setShowResults(true)} />
+            {search && <button className="icon-btn small" aria-label="Clear search" onClick={() => setSearch("")}>✕</button>}
+          </div>
           <select value={category} onChange={(e) => setCategory(e.target.value as PlaceCategory | "")}>
             <option value="">All categories</option>
             {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label}</option>)}
@@ -127,7 +142,38 @@ export function MapView() {
             {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
           </select>
           <span className="muted small" style={{ alignSelf: "center" }}>{filtered.length} places</span>
+          <button className="btn small" onClick={() => setAdding(true)}>＋ Add place</button>
         </div>
+        {!search && places.length > 0 && (
+          <div className="search-examples">
+            {SEARCH_EXAMPLES.map((ex) => <button key={ex} className="chip-btn" onClick={() => setSearch(ex)}>{ex}</button>)}
+          </div>
+        )}
+        {smart && showResults && (
+          <div className="smart-results material">
+            <div className="row">
+              <SearchChips chips={smart.chips} count={smart.hits.length} />
+              <span className="grow" />
+              <button className="icon-btn small" title="Hide list" onClick={() => setShowResults(false)}>▾</button>
+            </div>
+            <div className="smart-results-list">
+              {smart.hits.slice(0, 40).map((h) => (
+                <button key={h.place.id} className="smart-result" onClick={() => {
+                  setSelected(h.place);
+                  mapRef.current?.easeTo({ center: [h.place.longitude, h.place.latitude], zoom: Math.max(mapRef.current.getZoom(), 12) });
+                }}>
+                  <Thumb path={h.place.heroImagePath ?? h.place.thumbnailPath} fallback={CATEGORY[h.place.category]?.emoji} />
+                  <div className="grow">
+                    <div className="strong">{h.place.canonicalName}</div>
+                    <div className="muted small"><Flag code={h.place.countryCode} name={h.place.country} /> {[h.place.city, h.place.country].filter(Boolean).join(", ")}</div>
+                    {h.matches[0] && <MatchSnippet fact={h.matches[0]} />}
+                  </div>
+                </button>
+              ))}
+              {smart.hits.length === 0 && <p className="muted small">Nothing saved matches that yet. Try fewer words, or a country or kind of place.</p>}
+            </div>
+          </div>
+        )}
         {countries.length > 0 && (
           <div className="country-chips">
             {countries.slice(0, 14).map((c) => (
@@ -141,24 +187,47 @@ export function MapView() {
 
       {places.length === 0 && <Onboarding />}
 
-      {selected && (
-        <div className="map-preview">
-          <Thumb path={selected.heroImagePath ?? selected.thumbnailPath} />
-          <div className="map-preview-body">
-            <div className="row">
-              <h3 className="grow">{selected.canonicalName}</h3>
-              <StatusBadge place={selected} />
-              <button className="icon-btn" onClick={() => setSelected(undefined)}>✕</button>
-            </div>
-            <PlaceLine place={selected} />
-            <div className="row wrap">
-              <CategoryChip category={selected.category} />
-              <span className="muted small">{selected.sourceCount} source{selected.sourceCount === 1 ? "" : "s"}</span>
-            </div>
-            <button className="btn primary" onClick={() => nav.openPlace(selected.id)}>Open details</button>
-          </div>
+      {selected && <MapPreview place={selected} onClose={() => setSelected(undefined)} onOpen={() => nav.openPlace(selected.id)} />}
+      {adding && <QuickAddPlace onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+/** The card shown when you tap a pin: photo with the name over it, where, what kind, and your status. */
+function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => void; onOpen: () => void }) {
+  const cat = CATEGORY[place.category] ?? CATEGORY.other;
+  const status = STATUS[place.personalStatus];
+  const hero = place.heroImagePath ?? place.thumbnailPath;
+  return (
+    <div className="map-preview" key={place.id}>
+      <div className="map-preview-hero">
+        <Thumb path={hero} fallback={<span className="map-preview-fallback">{cat.emoji}</span>} />
+        <div className="map-preview-shade" />
+        <button className="map-preview-close" onClick={onClose} aria-label="Close">✕</button>
+        <div className="map-preview-title">
+          <span className="map-preview-kind" style={{ background: cat.color }}>{cat.emoji} {cat.label}</span>
+          <h3>{place.canonicalName}</h3>
         </div>
-      )}
+      </div>
+      <div className="map-preview-body">
+        <div className="map-preview-where">
+          <Flag code={place.countryCode} name={place.country} />
+          <span>{[place.city !== place.canonicalName ? place.city : null, place.country].filter(Boolean).join(", ") || "Unknown location"}</span>
+        </div>
+        {place.summaryText && <p className="map-preview-summary">{place.summaryText}</p>}
+        <div className="map-preview-meta">
+          <span className={`status-pill status-${place.personalStatus}`}>{status.emoji} {status.label}</span>
+          <span className="meta-pill">🗂 {place.sourceCount} source{place.sourceCount === 1 ? "" : "s"}</span>
+          {place.memoryCount > 0 && <span className="meta-pill">📷 {place.memoryCount}</span>}
+        </div>
+        <div className="map-preview-actions">
+          <button className="btn primary grow" onClick={onOpen}>Open details</button>
+          <button className="btn" title="Open in Apple Maps"
+                  onClick={() => openUrl(`https://maps.apple.com/?ll=${place.latitude},${place.longitude}&q=${encodeURIComponent(place.canonicalName)}`)}>
+            🧭 Maps
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

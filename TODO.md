@@ -90,3 +90,12 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] `npm run tauri …` works even when Terminal doesn't have Rust on its PATH
 
 - [x] Test run moved from Sources to Settings → Diagnostics ("Test on a sample")
+
+## Milestone G — Find, plan and remember (v0.3)
+- [x] Smart Search on the Map and in Places (local query understanding over saved facts; no AI, no embeddings)
+- [x] ＋ Add Place from Apple Maps (no screenshot needed; duplicates open the existing place)
+- [x] Freshness & conflict warnings: stale prices/hours, sources that disagree, different best-time advice — on places, Places badges and trips
+- [x] My visit: visit date, your own notes, your own photos from Photos (near the place or by date), your photo as cover
+- [x] Library schema v4 (visits + memories) with pre-migration backup; backups include your attached photos
+- [x] Settings: cost summary on top, standard prices automatic (custom under Advanced), grouped colour-coded diagnostics
+- [x] Map preview card redesigned (photo with title, category, status, Apple Maps button)

@@ -75,9 +75,9 @@ For production, set **Settings → API base URL** to your own backend proxy so t
 - **📸 Scan New Screenshots** (Sources, or the Map's first-run card) — compares PhotoKit asset IDs (and file paths of
   your folders) with the database and processes only screenshots it hasn't seen. Interrupted work resumes; failed items
   are retried only when you ask (**Retry failed**), so a persistent error never burns AI calls in a loop.
-- **🧪 Test run…** — process 10 / 25 / 50 / 100 unprocessed screenshots (random sample or newest) and get a report:
-  travel / not travel / needs review / failed, places found, place-resolution success, OCR and AI time, and the
-  estimated DeepSeek cost. Past runs are listed in Settings.
+- **🧪 Test run…** (Settings → Diagnostics) — process 10 / 25 / 50 / 100 unprocessed screenshots (random sample or newest)
+  and get a report: travel / not travel / needs review / failed, places found, place-resolution success, OCR and AI time,
+  and the estimated DeepSeek cost. Past runs are listed next to it.
 - **📁 Import Folder…** — screenshots from any device (PNG, JPG, HEIC…). Same pipeline, same "only new" logic.
 - **Automatically process new screenshots** (Settings, **off by default**) — when on, new screenshots are processed as
   soon as Photos reports them.
@@ -86,6 +86,20 @@ For production, set **Settings → API base URL** to your own backend proxy so t
   **Auto language** picks the spoken language from the caption / on-screen text; you can re-transcribe in English,
   Japanese, Chinese, Korean, Tamil and every other language Apple supports on your Mac (Sinhala isn't supported by
   Apple speech recognition — its caption and on-screen text are still used).
+
+- **🔎 Smart Search** (Map and Places) — ask like you'd ask a friend: *“Places in Japan good for sunrise”*,
+  *“Restaurants I saved from Instagram in Tokyo”*, *“Where someone mentioned avoiding crowds”*, *“Things requiring
+  advance booking”*. The query is understood locally (countries, your cities, kinds of place, sources and @creators,
+  visited / not visited, and ~25 travel ideas such as sunrise, crowds, booking, free, photo spots, rainy day, seasons)
+  and matched against your saved facts — no AI call, no embeddings, instant. Each result shows the fact that matched.
+- **＋ Add Place** — a place you know without a screenshot or Reel: search Apple Maps, pick the result, choose
+  Want to Visit (or another status) and save. Already saved? You're taken to the existing place instead.
+- **⚠️ Before you go** — saved info that may be out of date or that disagrees: *“Ticket price saved 18 months ago”*,
+  *“Two sources give different opening times”*, *“Different recommendations for the best time to visit”* (e.g. sunrise
+  vs sunset). Shown on the place, as a badge in Places, and for every place in a trip.
+- **✅ My visit** — once you've been, add the date, your own notes and your own photos from Photos (taken near the
+  place by GPS, or on the days you were there). Any of them can become the cover. Originals stay in Photos; screenshots
+  are never offered. Your map becomes both a wishlist and a travel memory map.
 
 ## Real-data results
 
@@ -184,7 +198,7 @@ TODO.md                   Build progress checklist
 ## Tests
 
 ```bash
-cd src-tauri && cargo test          # 74 tests (+3 opt-in live tests): pipelines with mocks, real-data regressions, migrations, backup, pricing
+cd src-tauri && cargo test          # 83 tests (+3 opt-in live tests): pipelines with mocks, real-data regressions, migrations, backup, pricing, Smart Search, warnings
 # Live checks (use your key; tiny cost):
 TSM_LIVE_IMAGE=/path/to/screenshot.jpg cargo test live_screenshot -- --ignored --nocapture
 TSM_LIVE_COUNT=100 TSM_LIVE_DB=/tmp/v.sqlite cargo test live_photos -- --ignored --nocapture   # real Photos sample

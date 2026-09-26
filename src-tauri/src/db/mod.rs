@@ -1,6 +1,7 @@
 //! SQLite persistence (`DatabaseService`). All SQL lives in this module.
 
 pub mod records;
+mod memories_repo;
 mod reels_repo;
 mod repo;
 mod runs_repo;
@@ -15,6 +16,7 @@ use serde::Serialize;
 use crate::config::AppConfig;
 use crate::services::ai::types::AiUsage;
 pub use records::*;
+pub use memories_repo::{NewMemory, PlaceProvenance};
 pub use reels_repo::FactProvenance;
 pub use runs_repo::{CostSummary, RunRecord, RunReport};
 pub use repo::{PlaceFilter, ScreenshotFilter};
@@ -31,13 +33,14 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// (schema version reached, SQL). Append new steps; never edit a shipped one.
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("schema.sql")),
     (2, include_str!("migration_v2.sql")),
     (3, include_str!("migration_v3.sql")),
+    (4, include_str!("migration_v4.sql")),
 ];
 
 /// Library open failures, worded for people rather than developers.
@@ -295,16 +298,16 @@ mod migration_tests {
         {
             let db = Database::open(&path).unwrap();
             db.set_setting("marker", Some("my data")).unwrap();
-            // Pretend this library is one version older: re-running v3 then fails ("duplicate column").
-            db.with(|c| c.execute_batch("PRAGMA user_version = 2")).unwrap();
+            // Pretend this library is one version older: re-running v4 then fails ("duplicate column").
+            db.with(|c| c.execute_batch("PRAGMA user_version = 3")).unwrap();
         }
         let err = Database::open(&path).err().expect("upgrade must fail").to_string();
-        assert!(err.contains("original library is intact") && err.contains("pre-migration-v2-to-v3"), "{err}");
+        assert!(err.contains("original library is intact") && err.contains("pre-migration-v3-to-v4"), "{err}");
 
         let conn = Connection::open(&path).unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         let marker: String = conn.query_row("SELECT value FROM settings WHERE key = 'marker'", [], |r| r.get(0)).unwrap();
-        assert_eq!((version, marker.as_str()), (2, "my data"), "the failed step was rolled back");
+        assert_eq!((version, marker.as_str()), (3, "my data"), "the failed step was rolled back");
         let backups: Vec<_> = std::fs::read_dir(dir.join("backups")).unwrap().collect();
         assert_eq!(backups.len(), 1);
         std::fs::remove_dir_all(dir).unwrap();

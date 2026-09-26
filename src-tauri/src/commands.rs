@@ -195,6 +195,8 @@ pub async fn get_place_detail(state: State<'_, AppState>, id: String) -> CmdResu
         "images": db.images_for_place(&id).map_err(err)?,
         "nearby": nearby,
         "trips": db.trips_for_place(&id).map_err(err)?,
+        "memories": db.memories_for_place(&id).map_err(err)?,
+        "warnings": crate::insights::warnings_for(&db.facts_for_place(&id).map_err(err)?, place.category, chrono::Local::now().date_naive()),
     }))
 }
 
@@ -599,4 +601,153 @@ pub async fn import_reels_from_file(state: State<'_, AppState>, path: String) ->
     }
     let bytes = std::fs::read(&path).map_err(err)?;
     import_many(&state, &String::from_utf8_lossy(&bytes))
+}
+
+// MARK: Smart Search, quick add, warnings and after-trip memories
+
+/// Natural-language search over your saved places and facts ("restaurants from Instagram in Tokyo").
+#[tauri::command]
+pub async fn smart_search(state: State<'_, AppState>, query: String, verified_only: bool) -> CmdResult<crate::insights::SmartSearchResult> {
+    crate::insights::smart_search(&state.db, &query, verified_only).map_err(err)
+}
+
+/// Freshness and conflict warnings for every place that has any.
+#[tauri::command]
+pub async fn place_warnings(state: State<'_, AppState>) -> CmdResult<std::collections::HashMap<String, Vec<crate::insights::PlaceWarning>>> {
+    crate::insights::all_warnings(&state.db).map_err(err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualPlace {
+    id: String,
+    /// The place was already saved (same Apple Maps place or same name nearby); nothing was duplicated.
+    existing: bool,
+}
+
+/// + Add Place: a place you know without a screenshot or Reel. Coordinates come from Apple Maps.
+#[tauri::command]
+pub async fn add_manual_place(
+    state: State<'_, AppState>,
+    candidate: PlaceCandidate,
+    status: String,
+    category: Option<String>,
+    notes: Option<String>,
+) -> CmdResult<ManualPlace> {
+    let db = &state.db;
+    if let merge::PlaceMatch::Same(existing) = merge::find_match(db, &candidate, &[]).map_err(err)? {
+        return Ok(ManualPlace { id: existing.id, existing: true });
+    }
+    let category = category
+        .as_deref()
+        .and_then(PlaceCategory::try_parse)
+        .or_else(|| candidate.category_hint())
+        .unwrap_or_default();
+    let place = db.insert_place(&candidate, category, Verification::UserVerified, DataOrigin::User, &[]).map_err(err)?;
+    let status = PersonalStatus::try_parse(&status).unwrap_or_default();
+    db.update_place_field(&place.id, "personalStatus", Some(status.as_str())).map_err(err)?;
+    if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
+        db.update_place_field(&place.id, "notes", Some(n.trim())).map_err(err)?;
+    }
+    Ok(ManualPlace { id: place.id, existing: false })
+}
+
+/// Your own photos (not screenshots) taken within `radius_km` of the place.
+#[tauri::command]
+pub async fn photos_near_place(state: State<'_, AppState>, place_id: String, radius_km: f64) -> CmdResult<Vec<crate::services::native::OwnPhoto>> {
+    let place = state.db.place(&place_id).map_err(err)?.ok_or("Place not found")?;
+    state.pipeline.photos.photos_near(place.latitude, place.longitude, radius_km.clamp(0.05, 50.0), 400).await.map_err(err)
+}
+
+/// Your own photos taken between two days (YYYY-MM-DD, inclusive).
+#[tauri::command]
+pub async fn photos_between(state: State<'_, AppState>, from: String, to: String) -> CmdResult<Vec<crate::services::native::OwnPhoto>> {
+    state.pipeline.photos.photos_between(&from, &to, 400).await.map_err(err)
+}
+
+fn preview_name(asset_id: &str) -> String {
+    format!("{}.jpg", asset_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>())
+}
+
+/// Small previews for the photo picker (cached). Returns asset id → file path; unavailable ones are left out.
+#[tauri::command]
+pub async fn photo_previews(state: State<'_, AppState>, ids: Vec<String>) -> CmdResult<std::collections::HashMap<String, String>> {
+    use futures::stream::{self, StreamExt};
+    let dir = state.pipeline.data_dir.join("memories").join(".previews");
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let photos = state.pipeline.photos.clone();
+    let results: Vec<Option<(String, String)>> = stream::iter(ids)
+        .map(|id| {
+            let photos = photos.clone();
+            let path = dir.join(preview_name(&id));
+            async move {
+                if !path.exists() {
+                    photos.thumbnail(&id, &path, 360).await.ok()?;
+                }
+                Some((id, path.to_string_lossy().into_owned()))
+            }
+        })
+        .buffer_unordered(6)
+        .collect()
+        .await;
+    Ok(results.into_iter().flatten().collect())
+}
+
+/// Attaches your own photos to a place (copies are made; originals stay in Photos) and marks it visited.
+#[tauri::command]
+pub async fn attach_memories(state: State<'_, AppState>, place_id: String, photos: Vec<crate::services::native::OwnPhoto>) -> CmdResult<usize> {
+    let db = &state.db;
+    db.place(&place_id).map_err(err)?.ok_or("Place not found")?;
+    let dir = state.pipeline.data_dir.join("memories").join(&place_id);
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let mut added = 0;
+    let mut last_error = None;
+    for photo in &photos {
+        if db.memory_exists(&place_id, &photo.id).map_err(err)? {
+            continue;
+        }
+        let name = new_id();
+        let image = dir.join(format!("{name}.jpg"));
+        let thumb = dir.join(format!("{name}_thumb.jpg"));
+        let exported = async {
+            state.pipeline.photos.export_image(&photo.id, &image, 2048).await?;
+            state.pipeline.photos.thumbnail(&photo.id, &thumb, 480).await
+        }
+        .await;
+        if let Err(e) = exported {
+            last_error = Some(e.to_string());
+            let _ = std::fs::remove_file(&image);
+            continue;
+        }
+        let memory = NewMemory {
+            place_id: &place_id,
+            photos_id: &photo.id,
+            taken_at: photo.creation_date.as_deref(),
+            latitude: photo.latitude,
+            longitude: photo.longitude,
+            image_path: &image.to_string_lossy(),
+            thumbnail_path: &thumb.to_string_lossy(),
+        };
+        if db.insert_memory(&memory).map_err(err)?.is_some() {
+            added += 1;
+        }
+    }
+    if added == 0 {
+        if let Some(e) = last_error {
+            return Err(format!("Couldn't copy the photos from Photos: {e}"));
+        }
+    }
+    let first_day = photos.iter().filter_map(|p| p.creation_date.as_deref()).filter_map(|d| d.get(..10)).min().map(String::from);
+    db.mark_visited(&place_id, first_day.as_deref()).map_err(err)?;
+    Ok(added)
+}
+
+#[tauri::command]
+pub async fn remove_memory(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    if let Some(m) = state.db.memory(&id).map_err(err)? {
+        for p in [m.image_path, m.thumbnail_path].into_iter().flatten() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+    state.db.delete_memory(&id).map_err(err)
 }

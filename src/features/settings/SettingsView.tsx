@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppService, PhotoLibraryService, ProcessingService, ReelService, SettingsService } from "../../api/services";
-import type { AppConfig, CostSummary, RunReport } from "../../api/types";
+import type { AppConfig, CostSummary, Diagnostics, RunReport } from "../../api/types";
 import { ErrorNote, Modal } from "../../components/common";
 import { RunReportView, TestRunDialog } from "../../components/ScanControls";
 import { BackupCard } from "./BackupCard";
@@ -41,6 +41,50 @@ export function SettingsView() {
         <button className="btn primary" onClick={save}>Save settings</button>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
+
+      <div className="card cost-card">
+        <div className="row wrap">
+          <h3 className="grow">Estimated AI cost</h3>
+          <select value={config.pricing.mode} onChange={(e) => set("pricing", { ...config.pricing, mode: e.target.value as typeof config.pricing.mode })}>
+            <option value="timeOfDay">Billing: by time of day</option>
+            <option value="peak">Billing: always peak (conservative)</option>
+            <option value="offPeak">Billing: always off-peak</option>
+          </select>
+        </div>
+        {cost ? <CostSummaryView cost={cost} mode={config.pricing.mode} /> : <p className="muted small">Calculating…</p>}
+        <p className="muted small">
+          An estimate from the exact token counts — DeepSeek bills from its own records.{" "}
+          {config.pricing.custom
+            ? "Using your custom prices."
+            : `Prices: ${config.model} standard rates (${config.pricing.source.replace(/^.*checked /, "checked ")}) — $${config.pricing.peak.inputCacheMiss} input / $${config.pricing.peak.output} output per 1M tokens at peak (Mon–Fri ${config.pricing.peakHoursUtc.map(([a, b]) => `${a}–${b}`).join(", ")} UTC), half that off-peak.`}
+        </p>
+        <details className="advanced" open={config.pricing.custom || undefined}>
+          <summary>Advanced: custom prices</summary>
+          <label className="check">
+            <input type="checkbox" checked={config.pricing.custom}
+                   onChange={(e) => set("pricing", e.target.checked ? { ...config.pricing, custom: true } : { ...settings.defaults.pricing, mode: config.pricing.mode })} />
+            <span>Use my own prices <span className="muted small">(only if DeepSeek changes its rates or you use a proxy)</span></span>
+          </label>
+          {config.pricing.custom && (
+            <table className="price-table">
+              <thead><tr><th>USD per 1M tokens</th><th>Peak</th><th>Off-peak</th></tr></thead>
+              <tbody>
+                {([["inputCacheMiss", "Input (cache miss)"], ["inputCacheHit", "Input (cache hit)"], ["output", "Output"]] as const).map(([key, label]) => (
+                  <tr key={key}>
+                    <td>{label}</td>
+                    {(["peak", "offPeak"] as const).map((window) => (
+                      <td key={window}>
+                        <input type="number" step={0.001} min={0} value={config.pricing[window][key]}
+                               onChange={(e) => set("pricing", { ...config.pricing, [window]: { ...config.pricing[window], [key]: Number(e.target.value) } })} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </details>
+      </div>
 
       <div className="settings-grid">
         <div className="card">
@@ -138,38 +182,6 @@ export function SettingsView() {
 
         <BackupCard />
 
-        <div className="card">
-          <h3>Estimated AI cost</h3>
-          <p className="muted small">
-            An estimate only — DeepSeek bills from its own records. Token counts are stored exactly; estimates are
-            recalculated when you change these prices. Defaults: {config.pricing.source}.
-          </p>
-          {cost && <CostSummaryView cost={cost} mode={config.pricing.mode} />}
-          <div className="field"><label>Pricing</label>
-            <select value={config.pricing.mode} onChange={(e) => set("pricing", { ...config.pricing, mode: e.target.value as typeof config.pricing.mode })}>
-              <option value="timeOfDay">By time of day (peak Mon–Fri {config.pricing.peakHoursUtc.map(([s, e]) => `${s}:00–${e}:00`).join(", ")} UTC)</option>
-              <option value="peak">Always peak (conservative)</option>
-              <option value="offPeak">Always off-peak</option>
-            </select>
-          </div>
-          <table className="price-table">
-            <thead><tr><th>USD per 1M tokens</th><th>Peak</th><th>Off-peak</th></tr></thead>
-            <tbody>
-              {([["inputCacheMiss", "Input (cache miss)"], ["inputCacheHit", "Input (cache hit)"], ["output", "Output"]] as const).map(([key, label]) => (
-                <tr key={key}>
-                  <td>{label}</td>
-                  {(["peak", "offPeak"] as const).map((window) => (
-                    <td key={window}>
-                      <input type="number" step={0.001} min={0} value={config.pricing[window][key]}
-                             onChange={(e) => set("pricing", { ...config.pricing, [window]: { ...config.pricing[window], [key]: Number(e.target.value) } })} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <span className="hint small muted">Chinese public holidays are billed off-peak by DeepSeek but aren't modelled, so estimates for those days are slightly high.</span>
-        </div>
       </div>
 
       <div className="section"><h3>Diagnostics</h3></div>
@@ -188,7 +200,7 @@ export function SettingsView() {
           <div className="list">
             {runs.map((r) => (
               <div key={r.id} className="list-row" onClick={async () => setRunReport((await ProcessingService.runReport(r.id)) ?? undefined)}>
-                <div className="grow"><div className="strong">{r.kind === "validation" ? `Test run ·  ()` : r.kind === "scanFolder" ? "Folder scan" : "Scan New Screenshots"}</div>
+                <div className="grow"><div className="strong">{r.kind === "validation" ? `Test run · ${r.sample}` : r.kind === "scanFolder" ? "Folder scan" : "Scan New Screenshots"}</div>
                   <div className="muted small">{formatDate(r.startedAt)} · {r.screenshotCount} screenshots{r.finishedAt ? "" : " · running"}</div></div>
                 <span className="muted small">View report →</span>
               </div>
@@ -198,50 +210,9 @@ export function SettingsView() {
       )}
       {runReport && <Modal title="Run report" onClose={() => setRunReport(undefined)} wide><RunReportView report={runReport} /></Modal>}
 
-      {diag && (
-        <>
-          <div className="section"><h4>Usage &amp; performance</h4></div>
-          <div className="stat-grid">
-            {[
-              ["Screenshots", diag.totalScreenshots], ["Travel", diag.travelScreenshots], ["Skipped locally", diag.skippedLocally],
-              ["Not travel", diag.notTravel], ["Needs review", diag.needsReview], ["Failed", diag.failed], ["Remaining", diag.remaining],
-              ["Places", diag.places], ["AI requests", diag.aiRequests], ["Text-only", diag.aiTextRequests], ["With image", diag.aiVisionRequests],
-              ["With thinking", diag.aiThinkingRequests], ["AI failures", diag.aiFailures],
-              ["Input tokens", diag.aiInputTokens.toLocaleString()], ["Output tokens", diag.aiOutputTokens.toLocaleString()],
-              ["Cache-hit tokens", diag.aiCacheHitTokens.toLocaleString()], ["Estimated AI cost", `$${diag.aiEstimatedCost.toFixed(4)}`],
-              ["Est. AI cost / travel screenshot", diag.travelScreenshots ? `$${(diag.aiEstimatedCost / diag.travelScreenshots).toFixed(5)}` : "—"],
-              ["Est. AI cost / place", diag.places ? `$${(diag.aiEstimatedCost / diag.places).toFixed(5)}` : "—"],
-              ["Avg AI latency", `${(diag.aiAverageLatencyMs / 1000).toFixed(1)} s`],
-            ].map(([label, value]) => (
-              <div key={label as string} className="stat"><div className="stat-value">{value}</div><div className="stat-label">{label}</div></div>
-            ))}
-          </div>
-          <div className="section"><h4>Timings & counters</h4></div>
-          <div className="stat-grid">
-            {timings(diag.metrics).map(([label, value]) => (
-              <div key={label} className="stat"><div className="stat-value">{value}</div><div className="stat-label">{label}</div></div>
-            ))}
-          </div>
-        </>
-      )}
+      {diag && <DiagnosticsView diag={diag} />}
     </div>
   );
-}
-
-/** Turns `x.ms` / `x.count` pairs into averages; other counters are shown as-is. */
-function timings(metrics: [string, number][]): [string, string][] {
-  const m = new Map(metrics);
-  const out: [string, string][] = [];
-  for (const [k, v] of metrics) {
-    if (k.endsWith(".ms")) {
-      const base = k.slice(0, -3);
-      const n = m.get(`${base}.count`) ?? 1;
-      out.push([`avg ${base}`, `${Math.round(v / n)} ms`]);
-    } else if (!k.endsWith(".count")) {
-      out.push([k, String(v)]);
-    }
-  }
-  return out;
 }
 
 const usd = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
@@ -284,5 +255,74 @@ function CostSummaryView({ cost, mode }: { cost: CostSummary; mode: string }) {
         ))}
       </div>
     </div>
+  );
+}
+
+const ms = (v?: number) => (v === undefined ? "—" : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
+const n = (v?: number) => (v === undefined ? "—" : v.toLocaleString());
+
+type Stat = [label: string, value: string, tone?: "ok" | "warn" | "bad" | "accent"];
+
+/** Diagnostics grouped by what they describe, each group with its own colour. */
+function DiagnosticsView({ diag }: { diag: Diagnostics }) {
+  const metric = new Map(diag.metrics);
+  const avg = (key: string) => {
+    const total = metric.get(`${key}.ms`);
+    return total === undefined ? undefined : total / (metric.get(`${key}.count`) || 1);
+  };
+  const processed = diag.totalScreenshots - diag.remaining;
+  const pct = diag.totalScreenshots ? Math.round((processed / diag.totalScreenshots) * 100) : 0;
+  const successful = diag.aiRequests - diag.aiFailures;
+
+  const groups: { title: string; tone: string; hint?: string; stats: Stat[] }[] = [
+    { title: "Library", tone: "blue", hint: `${pct}% processed`, stats: [
+      ["Screenshots", n(diag.totalScreenshots)], ["Processed", n(processed), "ok"], ["Remaining", n(diag.remaining), diag.remaining ? "warn" : undefined],
+      ["Failed", n(diag.failed), diag.failed ? "bad" : undefined],
+    ] },
+    { title: "Results", tone: "green", stats: [
+      ["Travel", n(diag.travelScreenshots), "ok"], ["Places", n(diag.places), "ok"], ["Needs review", n(diag.needsReview), diag.needsReview ? "warn" : undefined],
+      ["Not travel", n(diag.notTravel)], ["Skipped on your Mac", n(diag.skippedLocally)], ["Open reviews", n(diag.openReviews)],
+    ] },
+    { title: "Place matching (Apple Maps)", tone: "teal", stats: [
+      ["Auto-resolved", n(metric.get("maps.autoResolved")), "ok"], ["Sent to review", n(metric.get("maps.review")), "warn"],
+      ["Unresolved", n(metric.get("maps.unresolved"))], ["Places created", n(metric.get("places.created"))],
+      ["Photo regions accepted", n(metric.get("images.accepted"))],
+    ] },
+    { title: "AI requests", tone: "purple", hint: `${n(metric.get("ai.avoidedByLocalFilter") ?? 0)} avoided by the local filter`, stats: [
+      ["Successful", n(successful), "ok"], ["Failed", n(diag.aiFailures), diag.aiFailures ? "bad" : undefined],
+      ["Text only", n(diag.aiTextRequests)], ["With image", n(diag.aiVisionRequests)], ["With thinking", n(diag.aiThinkingRequests)],
+      ["Avg response", ms(diag.aiAverageLatencyMs)],
+    ] },
+    { title: "Tokens & cost", tone: "orange", stats: [
+      ["Input tokens", n(diag.aiInputTokens)], ["Cache-hit tokens", n(diag.aiCacheHitTokens)], ["Output tokens", n(diag.aiOutputTokens)],
+      ["Estimated cost", usd(diag.aiEstimatedCost), "accent"],
+      ["Per travel screenshot", diag.travelScreenshots ? usd(diag.aiEstimatedCost / diag.travelScreenshots) : "—"],
+      ["Per place", diag.places ? usd(diag.aiEstimatedCost / diag.places) : "—"],
+    ] },
+    { title: "Speed (average per screenshot)", tone: "gray", stats: [
+      ["Whole pipeline", ms(avg("pipeline.total")), "accent"], ["Photos export", ms(avg("photos.export"))], ["Text recognition", ms(avg("ocr"))],
+      ["Photo analysis", ms(avg("images.analyze"))], ["AI extraction", ms(avg("ai.extract"))], ["Map lookup", ms(avg("maps.resolve"))],
+    ] },
+  ];
+
+  return (
+    <>
+      <div className="section"><h3>Usage &amp; performance</h3></div>
+      <div className="diag-groups">
+        {groups.map((g) => (
+          <section key={g.title} className={`diag-group tone-${g.tone}`}>
+            <header><span className="diag-dot" /><h4>{g.title}</h4>{g.hint && <span className="muted small">{g.hint}</span>}</header>
+            <div className="diag-row">
+              {g.stats.map(([label, value, tone]) => (
+                <div key={label} className={`diag-stat ${tone ? `is-${tone}` : ""}`}>
+                  <div className="diag-value">{value}</div>
+                  <div className="diag-label">{label}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </>
   );
 }

@@ -3,6 +3,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig, CostSummary, Diagnostics, Pricing, LibraryItem, PhotoVideo, ReelDetail, Reel, RunMode, RunRecord, RunReport, ScanPreview, SpeechLocale, Overview, PlaceCandidate, PlaceDetail, PlaceFilter, Place, QueueSnapshot, Rect,
+  Memory, OwnPhoto, PersonalStatus, PlaceWarning, SmartSearchResult,
   ReviewEntry, Screenshot, ScreenshotDetail, ScreenshotView, Settings, Trip, TripEntry,
 } from "./types";
 
@@ -49,7 +50,7 @@ export const ProcessingService = {
 export const PlaceService = {
   list: (filter: PlaceFilter = {}) => invoke<Place[]>("list_places", { filter }),
   detail: (id: string) => invoke<PlaceDetail>("get_place_detail", { id }),
-  update: (id: string, field: "canonicalName" | "category" | "personalStatus" | "notes" | "heroImageId", value: string | null) =>
+  update: (id: string, field: "canonicalName" | "category" | "personalStatus" | "notes" | "heroImageId" | "visitedAt" | "visitNotes" | "coverMemoryId", value: string | null) =>
     invoke<void>("update_place", { id, field, value }),
   setLocation: (id: string, candidate: PlaceCandidate) => invoke<void>("set_place_location", { id, candidate }),
   remove: (id: string) => invoke<void>("delete_place", { id }),
@@ -62,7 +63,24 @@ export const PlaceService = {
   summarize: (id: string) => invoke<string>("summarize_place", { id }),
   /** Map provider search — coordinates always come from here, never from AI. */
   searchMap: (query: string) => invoke<PlaceCandidate[]>("search_map", { query }),
+  /** "+ Add Place": save an Apple Maps result directly. Returns the existing place if it's already saved. */
+  addManual: (candidate: PlaceCandidate, status: PersonalStatus, category: string | null, notes: string | null) =>
+    invoke<{ id: string; existing: boolean }>("add_manual_place", { candidate, status, category, notes }),
+  /** Out-of-date and conflicting saved information, per place id (only places that have any). */
+  warnings: () => invoke<Record<string, PlaceWarning[]>>("place_warnings"),
+  /** Natural-language search over saved places and facts — local and free (no AI call). */
+  smartSearch: (query: string, verifiedOnly = false) => invoke<SmartSearchResult>("smart_search", { query, verifiedOnly }),
 };
+
+/** After the trip: your own photos from Photos, attached to places you visited. */
+export const MemoryService = {
+  near: (placeId: string, radiusKm: number) => invoke<OwnPhoto[]>("photos_near_place", { placeId, radiusKm }),
+  between: (from: string, to: string) => invoke<OwnPhoto[]>("photos_between", { from, to }),
+  previews: (ids: string[]) => invoke<Record<string, string>>("photo_previews", { ids }),
+  attach: (placeId: string, photos: OwnPhoto[]) => invoke<number>("attach_memories", { placeId, photos }),
+  remove: (id: string) => invoke<void>("remove_memory", { id }),
+};
+export type { Memory };
 
 export const ScreenshotService = {
   list: (view: ScreenshotView, search?: string, limit = 400) =>

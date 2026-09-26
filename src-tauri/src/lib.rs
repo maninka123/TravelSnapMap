@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod countries;
 mod db;
+mod insights;
 mod models;
 mod pipeline;
 mod secrets;
@@ -209,6 +210,14 @@ pub fn run() {
             commands::correct_place,
             commands::save_manual_crop,
             commands::search_map,
+            commands::smart_search,
+            commands::place_warnings,
+            commands::add_manual_place,
+            commands::photos_near_place,
+            commands::photos_between,
+            commands::photo_previews,
+            commands::attach_memories,
+            commands::remove_memory,
             commands::list_reviews,
             commands::resolve_review,
             commands::list_trips,

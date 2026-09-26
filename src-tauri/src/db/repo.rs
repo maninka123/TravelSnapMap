@@ -381,6 +381,9 @@ impl Database {
             "personalStatus" => "personal_status",
             "notes" => "notes",
             "heroImageId" => "hero_image_id",
+            "visitedAt" => "visited_at",
+            "visitNotes" => "visit_notes",
+            "coverMemoryId" => "cover_memory_id",
             "verification" => "verification",
             _ => anyhow::bail!("unknown place field {field}"),
         };
