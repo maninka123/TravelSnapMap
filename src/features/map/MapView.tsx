@@ -120,7 +120,7 @@ export function MapView() {
     map.on("style.load", () => {
       const dark = resolveMapStyle(getMapStyleId()).dark;
       quietBasemap(map);
-      map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 50, clusterMaxZoom: CLUSTER_MAX_ZOOM });
+      map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 40, clusterMaxZoom: CLUSTER_MAX_ZOOM });
       // Category pins (images are dropped whenever the style changes, so add them each time).
       for (const c of Object.keys(GROUPS)) {
         if (!map.hasImage(`pin-${c}`)) map.addImage(`pin-${c}`, pinImage(c), { pixelRatio: 2 });
@@ -616,8 +616,9 @@ function toGeoJSON(places: Place[]): GeoJSON.FeatureCollection {
 }
 
 /** Places are clustered up to this zoom; from here on every place is its own icon. */
-const CLUSTER_MAX_ZOOM = 9;
-const CITY_ZOOM = CLUSTER_MAX_ZOOM + 1;
+const CLUSTER_MAX_ZOOM = 6;
+/** Picking a city zooms at least this close (well past clustering). */
+const CITY_ZOOM = 10;
 
 function fit(map: MLMap, places: Place[], minZoom?: number) {
   if (places.length === 0) return;
