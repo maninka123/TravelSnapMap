@@ -1,8 +1,11 @@
 import { useRef, useState } from "react";
 import { fileUrl, ScreenshotService } from "../../api/services";
 import type { Place, Rect, ScreenshotDetail as Detail } from "../../api/types";
-import { CategoryChip, ErrorNote, Modal, PlaceLine, PlaceSearchDialog, Pill, Thumb } from "../../components/common";
-import { FACT, formatDate, pct, PROCESSING, SOURCE } from "../../lib/labels";
+import { CategoryChip, ErrorNote, Modal, PlaceLine, Pill, Thumb } from "../../components/common";
+import { AddFact, FactRow } from "../../components/FactsEditor";
+import { PlaceSearchDialog } from "../../components/PlacePicker";
+import { PlaceService } from "../../api/services";
+import { formatDate, pct, PROCESSING, SOURCE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 
 export function ScreenshotDetail({ id, highlight }: { id: string; highlight?: string[] }) {
@@ -68,21 +71,22 @@ export function ScreenshotDetail({ id, highlight }: { id: string; highlight?: st
                       {link?.isUserVerified ? <Pill tone="ok">set by you</Pill> : link && <span className="muted small">{pct(link.confidence)} match</span>}
                     </div>
                   </div>
-                  <button className="btn small" onClick={() => setDialog({ correct: p })}>Correct</button>
+                  <span className="row">
+                    <button className="btn small" onClick={() => setDialog({ correct: p })}>Change</button>
+                    <button className="btn small ghost" title="This screenshot isn't about this place"
+                            onClick={() => action.run(() => PlaceService.removeScreenshot(p.id, id))}>Remove</button>
+                  </span>
                 </div>
               );
             })}
           </div>
 
-          {data.facts.length > 0 && (
+          {(data.facts.length > 0 || data.places.length > 0) && (
             <div className="card">
               <h3>Extracted information</h3>
-              {data.facts.map((f) => (
-                <div key={f.id} className="fact">
-                  <div className="fact-text">{FACT[f.type]?.emoji} {f.text}</div>
-                  {f.sourceQuote && <div className="muted small">“{f.sourceQuote}”</div>}
-                </div>
-              ))}
+              {data.facts.length === 0 && <p className="muted small">No tips found in this screenshot.</p>}
+              {data.facts.map((f) => <FactRow key={f.id} fact={f} />)}
+              <AddFact places={data.places} screenshotId={id} />
             </div>
           )}
 

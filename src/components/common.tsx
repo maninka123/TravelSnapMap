@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { fileUrl, PlaceService } from "../api/services";
+import { fileUrl } from "../api/services";
 import type { Place, PlaceCandidate } from "../api/types";
 import { CATEGORY, STATUS } from "../lib/labels";
+import { CategoryGlyph } from "../lib/categoryIcons";
 
 export function Thumb({ path, alt = "", className = "", fallback }: { path?: string | null; alt?: string; className?: string; fallback?: ReactNode }) {
   const src = fileUrl(path);
@@ -16,7 +17,7 @@ export function Pill({ tone = "muted", children, title }: { tone?: string; child
 
 export function CategoryChip({ category }: { category: Place["category"] }) {
   const c = CATEGORY[category] ?? CATEGORY.other;
-  return <span className="chip" style={{ borderColor: c.color, color: c.color }}>{c.emoji} {c.label}</span>;
+  return <span className="chip" style={{ borderColor: c.color, color: c.color }}><CategoryGlyph category={category} size={12} /> {c.label}</span>;
 }
 
 export function PlaceLine({ place }: { place: Place }) {
@@ -68,44 +69,6 @@ export function Empty({ icon, title, children }: { icon: string; title: string; 
       <h3>{title}</h3>
       {children && <div className="muted">{children}</div>}
     </div>
-  );
-}
-
-/** Map provider search dialog used for corrections. Coordinates come only from the provider. */
-export function PlaceSearchDialog({ title = "Find the place", initialQuery = "", onPick, onClose }: {
-  title?: string; initialQuery?: string; onPick: (c: PlaceCandidate) => void; onClose: () => void;
-}) {
-  const [query, setQuery] = useState(initialQuery);
-  const [results, setResults] = useState<PlaceCandidate[]>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-
-  const search = async () => {
-    if (!query.trim()) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      setResults(await PlaceService.searchMap(query.trim()));
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => { if (initialQuery) void search(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
-
-  return (
-    <Modal title={title} onClose={onClose}>
-      <form className="row" onSubmit={(e) => { e.preventDefault(); void search(); }}>
-        <input autoFocus className="grow" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. Blue Lagoon, Iceland" />
-        <button className="btn primary" disabled={busy}>{busy ? "Searching…" : "Search"}</button>
-      </form>
-      <ErrorNote error={error} />
-      <div className="candidate-list">
-        {results?.length === 0 && <p className="muted">No results. Try adding the city or country.</p>}
-        {results?.map((c, i) => <CandidateRow key={i} candidate={c} onPick={() => onPick(c)} />)}
-      </div>
-    </Modal>
   );
 }
 

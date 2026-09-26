@@ -105,3 +105,7 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Consistency pass: map/sidebar counts explained, Places filters show only what exists, clearer photo sections, wider photo search for cities, map card keeps in sync
 - [x] Small extras: change status from the map card, Open in Apple Maps on place pages, ⌘1–6 / ⌘F shortcuts
 - [x] README rewritten (short, professional)
+- [x] Edit processed results: edit/delete/add tips on screenshots, Reels and places (kept on reprocess); add/remove places on Reels; remove a wrong place from a screenshot
+- [x] Place picker everywhere: your saved places first ("Saved"), then Apple Maps as you type
+- [x] Review: All / Screenshots / Reels switch
+- [x] Map: category icon pins (one icon set used across the app); picking a city zooms past clustering

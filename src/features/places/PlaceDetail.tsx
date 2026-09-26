@@ -2,8 +2,11 @@ import maplibregl from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PlaceService, TripService } from "../../api/services";
 import type { Fact, Place, PlaceDetail as Detail, PlaceWarning } from "../../api/types";
-import { ErrorNote, Modal, PlaceLine, PlaceSearchDialog, Pill, Thumb } from "../../components/common";
+import { ErrorNote, Modal, PlaceLine, Pill, Thumb } from "../../components/common";
+import { AddFact, FactRow } from "../../components/FactsEditor";
+import { PlaceSearchDialog } from "../../components/PlacePicker";
 import { CATEGORY, FACT, formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
+import { CategoryBadge } from "../../lib/categoryIcons";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { quietBasemap } from "../map/MapView";
 import { resolveMapStyle } from "../../lib/mapStyle";
@@ -23,7 +26,7 @@ export function PlaceDetail({ id }: { id: string }) {
 
   return (
     <div>
-      <div className="hero"><Thumb path={hero} fallback={CATEGORY[place.category]?.emoji} /></div>
+      <div className="hero"><Thumb path={hero} fallback={<CategoryBadge category={place.category} size={72} />} /></div>
 
       <div className="detail-head">
         <EditableName place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "canonicalName", v))} />
@@ -34,7 +37,7 @@ export function PlaceDetail({ id }: { id: string }) {
             {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
           </select>
           <select value={place.category} onChange={(e) => action.run(() => PlaceService.update(place.id, "category", e.target.value))}>
-            {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label}</option>)}
+            {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
           </select>
           {place.verification === "needsReview" && <Pill tone="warn">Location not confirmed</Pill>}
           {place.isUserVerified && <Pill tone="ok">Verified by you</Pill>}
@@ -68,7 +71,8 @@ export function PlaceDetail({ id }: { id: string }) {
 
       <div className="section"><h3>Saved information</h3></div>
       <div className="disclaimer">Saved from your screenshots and Reels — it may be out of date, and nothing here comes from an external database.</div>
-      <InfoCards facts={data.facts} nearby={data.nearby} warned={new Set(data.warnings.flatMap((w) => w.factIds))} onDelete={(f) => action.run(() => PlaceService.deleteFact(f.id))} />
+      <div className="add-fact-bar"><AddFact places={[place]} /></div>
+      <InfoCards facts={data.facts} nearby={data.nearby} warned={new Set(data.warnings.flatMap((w) => w.factIds))} />
 
       {data.images.length > 0 && (
         <>
@@ -125,7 +129,7 @@ export function PlaceDetail({ id }: { id: string }) {
       <Notes place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "notes", v))} />
 
       {dialog === "location" && (
-        <PlaceSearchDialog title="Correct location" initialQuery={[place.canonicalName, place.city, place.country].filter(Boolean).join(", ")}
+        <PlaceSearchDialog title="Correct location" includeSaved={false} initialQuery={[place.canonicalName, place.city, place.country].filter(Boolean).join(", ")}
           onClose={() => setDialog(null)}
           onPick={async (c) => { setDialog(null); await action.run(() => PlaceService.setLocation(place.id, c)); }} />
       )}
@@ -212,7 +216,7 @@ function WhySaved({ detail }: { detail: Detail }) {
 }
 
 /** Groups facts into cards; contradictions stay side by side, each with its own source. */
-function InfoCards({ facts, nearby, warned, onDelete }: { facts: Fact[]; nearby: Detail["nearby"]; warned: Set<string>; onDelete: (f: Fact) => void }) {
+function InfoCards({ facts, nearby, warned }: { facts: Fact[]; nearby: Detail["nearby"]; warned: Set<string> }) {
   const nav = useNav();
   const cards = useMemo(() => INFO_CARDS.map((card) => ({
     ...card,
@@ -233,24 +237,17 @@ function InfoCards({ facts, nearby, warned, onDelete }: { facts: Fact[]; nearby:
             // For values that change (prices, hours), label the newest one.
             const sameTypeEarlier = TIME_SENSITIVE.has(f.type) && card.facts.slice(0, i).some((o) => o.type === f.type);
             return (
-              <div key={f.id} className="fact">
-                <div className="row">
-                  <div className="fact-text grow">
-                    {TIME_SENSITIVE.has(f.type) && card.facts.filter((o) => o.type === f.type).length > 1 &&
-                      <Pill tone={sameTypeEarlier ? "muted" : "ok"}>{sameTypeEarlier ? "Earlier" : "Latest saved"}</Pill>}{" "}
-                    {warned.has(f.id) && <span title="See “Before you go” above">⚠️ </span>}
-                    {f.text}
-                  </div>
-                  <button className="icon-btn fact-actions" title="Delete this fact" onClick={() => onDelete(f)}>🗑</button>
-                </div>
-                <FactSource fact={f} />
-              </div>
+              <FactRow key={f.id} fact={f} source={<FactSource fact={f} />} extra={<>
+                {TIME_SENSITIVE.has(f.type) && card.facts.filter((o) => o.type === f.type).length > 1 &&
+                  <><Pill tone={sameTypeEarlier ? "muted" : "ok"}>{sameTypeEarlier ? "Earlier" : "Latest saved"}</Pill>{" "}</>}
+                {warned.has(f.id) && <span title="See “Before you go” above">⚠️ </span>}
+              </>} />
             );
           })}
           {card.key === "nearby" && nearby.map((n) => (
             <div key={n.place.id} className="fact">
               <button className="btn ghost small" onClick={() => nav.openPlace(n.place.id)}>
-                {CATEGORY[n.place.category]?.emoji} {n.place.canonicalName}
+                <CategoryBadge category={n.place.category} size={20} /> {n.place.canonicalName}
               </button>
               <span className="muted small">{formatKm(n.distanceKm)} · saved</span>
             </div>

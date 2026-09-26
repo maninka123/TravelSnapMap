@@ -618,3 +618,33 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .link-btn:hover { text-decoration: underline; }
 
 .pb-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+/* Place picker: saved places first, then Apple Maps */
+.pick-hint { margin: 10px 2px; }
+.pick-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; max-height: 52vh; overflow: auto; }
+.pick-list h5 { margin: 0 0 4px; padding: 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.pick-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pick-row:hover { background: var(--fill); }
+.pick-row:active { background: var(--fill-strong); }
+.pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pick-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-sub { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-action { font-size: 12px; color: var(--accent); font-weight: 600; flex: none; }
+.saved-badge { flex: none; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); }
+.pick-spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--fill-strong); border-top-color: var(--accent); animation: spin 700ms linear infinite; }
+
+/* Tip editing */
+.fact .fact-actions { opacity: 0; transition: opacity 120ms; display: inline-flex; gap: 2px; }
+.fact:hover .fact-actions, .fact .fact-actions:focus-within { opacity: 1; }
+.fact-editing { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: var(--fill); }
+.add-fact-btn { margin-top: 6px; }
+.add-fact-bar { margin: -4px 0 8px; }
+
+/* Category icon set (same glyphs as the map pins) */
+.cat-badge { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 50%; color: #fff;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.9), 0 1px 3px rgba(0,0,0,0.25); }
+.cat-glyph { flex: none; vertical-align: -2px; }
+.chip .cat-glyph { margin-right: 1px; }
+.map-preview-kind { display: inline-flex; align-items: center; gap: 5px; }
+.thumb-empty .cat-badge { box-shadow: none; }
+.filters-chips .cat-badge { box-shadow: none; }

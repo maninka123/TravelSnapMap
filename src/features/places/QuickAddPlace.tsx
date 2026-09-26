@@ -1,29 +1,23 @@
 import { useState } from "react";
 import { PlaceService } from "../../api/services";
 import type { PersonalStatus, PlaceCandidate } from "../../api/types";
-import { CandidateRow, ErrorNote, Flag, Modal } from "../../components/common";
+import { ErrorNote, Flag, Modal } from "../../components/common";
+import { PlacePickList } from "../../components/PlacePicker";
 import { CATEGORY, STATUS } from "../../lib/labels";
 import { useAction, useNav } from "../../lib/nav";
 
 /**
- * "+ Add Place": a place you already know, without a screenshot or Reel. Search Apple Maps, pick the
- * result, choose a status and save. If it's already in your library you're taken to it instead.
+ * "+ Add Place": a place you already know, without a screenshot or Reel. Saved places are suggested first
+ * (picking one just opens it); otherwise pick an Apple Maps result, choose a status and save.
  */
 export function QuickAddPlace({ onClose }: { onClose: () => void }) {
   const nav = useNav();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PlaceCandidate[]>();
   const [picked, setPicked] = useState<PlaceCandidate>();
   const [status, setStatus] = useState<PersonalStatus>("wantToVisit");
   const [category, setCategory] = useState("");
   const [notes, setNotes] = useState("");
-  const search = useAction();
   const save = useAction();
-
-  const runSearch = async () => {
-    if (!query.trim()) return;
-    setResults(await search.run(() => PlaceService.searchMap(query.trim())) ?? []);
-  };
 
   const submit = async () => {
     if (!picked) return;
@@ -37,16 +31,11 @@ export function QuickAddPlace({ onClose }: { onClose: () => void }) {
     <Modal title={picked ? "Add place" : "Add a place you know"} onClose={onClose}>
       {!picked ? (
         <>
-          <p className="muted small">Search Apple Maps — the location always comes from the map, so it lands exactly on the right spot.</p>
-          <form className="row" onSubmit={(e) => { e.preventDefault(); void runSearch(); }}>
-            <input autoFocus className="grow" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. Fushimi Inari, Kyoto" />
-            <button className="btn primary" disabled={search.busy || !query.trim()}>{search.busy ? "Searching…" : "Search"}</button>
-          </form>
-          <ErrorNote error={search.error} onClose={search.clearError} />
-          <div className="candidate-list">
-            {results?.length === 0 && <p className="muted small">No results. Try adding the city or country.</p>}
-            {results?.map((c, i) => <CandidateRow key={i} candidate={c} action="Select" onPick={() => setPicked(c)} />)}
-          </div>
+          <p className="muted small">Type a place — places you've already saved come first; the location always comes from Apple Maps.</p>
+          <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. Fushimi Inari, Kyoto" />
+          <PlacePickList query={query} action="Select"
+            onPickSaved={(p) => { onClose(); nav.openPlace(p.id); }}
+            onPickMap={(c, existing) => { if (existing) { onClose(); nav.openPlace(existing.id); } else setPicked(c); }} />
         </>
       ) : (
         <div className="stack">
@@ -67,7 +56,7 @@ export function QuickAddPlace({ onClose }: { onClose: () => void }) {
           <div className="field"><label>Kind of place</label>
             <select value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">Automatic (from Apple Maps)</option>
-              {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label}</option>)}
+              {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
             </select>
           </div>
           <div className="field"><label>Notes (optional)</label>

@@ -4,6 +4,7 @@ import type { PlaceFilter } from "../../api/types";
 import { CategoryChip, Empty, Flag, Pill, PlaceLine, StatusBadge, Thumb } from "../../components/common";
 import { QuickAddPlace } from "./QuickAddPlace";
 import { CATEGORY, STATUS } from "../../lib/labels";
+import { CategoryBadge } from "../../lib/categoryIcons";
 import { useLoad, useNav } from "../../lib/nav";
 
 export function PlacesView() {
@@ -74,7 +75,7 @@ export function PlacesView() {
         </select>
         <select value={filter.category ?? ""} onChange={(e) => set({ category: e.target.value || undefined })}>
           <option value="">All categories</option>
-          {Object.entries(CATEGORY).filter(([k]) => available.categories.has(k)).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label} ({available.categories.get(k)})</option>)}
+          {Object.entries(CATEGORY).filter(([k]) => available.categories.has(k)).map(([k, c]) => <option key={k} value={k}>{c.label} ({available.categories.get(k)})</option>)}
         </select>
         <select value={filter.status ?? ""} onChange={(e) => set({ status: e.target.value || undefined })}>
           <option value="">Any status</option>
@@ -95,7 +96,7 @@ export function PlacesView() {
         <div className="grid">
           {places.map((p) => (
             <div key={p.id} className="tile" onClick={() => nav.openPlace(p.id)}>
-              <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={CATEGORY[p.category]?.emoji} />
+              <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
               <div className="tile-body">
                 <div className="row"><span className="tile-title grow">{p.canonicalName}</span><StatusBadge place={p} /></div>
                 <PlaceLine place={p} />
@@ -119,7 +120,7 @@ export function PlacesView() {
               <div className="list">
                 {items.map((p) => (
                   <div key={p.id} className="list-row" onClick={() => nav.openPlace(p.id)}>
-                    <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={CATEGORY[p.category]?.emoji} />
+                    <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
                     <div className="grow">
                       <div className="strong">{p.canonicalName}</div>
                       <div className="muted small">{[p.city, CATEGORY[p.category]?.label].filter(Boolean).join(" · ")}</div>

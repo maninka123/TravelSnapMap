@@ -747,3 +747,67 @@ pub async fn remove_memory(state: State<'_, AppState>, id: String) -> CmdResult<
     }
     state.db.delete_memory(&id).map_err(err)
 }
+
+// MARK: Editing processed results (your edits are kept when something is reprocessed)
+
+/// Edits a saved tip/fact. It becomes yours (origin "user"), so reprocessing never overwrites it.
+#[tauri::command]
+pub async fn update_fact(state: State<'_, AppState>, id: String, text: String, fact_type: String) -> CmdResult<()> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("A tip can't be empty — delete it instead.".into());
+    }
+    let kind = TravelFactType::try_parse(&fact_type).unwrap_or_default();
+    state.db.with(|c| c.execute(
+        "UPDATE travel_facts SET text = ?2, type = ?3, origin = 'user', confidence = 1.0 WHERE id = ?1",
+        rusqlite::params![id, text, kind],
+    )).map_err(err)?;
+    Ok(())
+}
+
+/// Adds your own tip to a place, optionally tied to the screenshot or Reel you're looking at.
+#[tauri::command]
+pub async fn add_fact(
+    state: State<'_, AppState>,
+    place_id: String,
+    fact_type: String,
+    text: String,
+    screenshot_id: Option<String>,
+    reel_id: Option<String>,
+) -> CmdResult<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("Write the tip first.".into());
+    }
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let source = FactProvenance {
+        screenshot_id: screenshot_id.as_deref(),
+        reel_id: reel_id.as_deref(),
+        kind: "user",
+        time_sec: None,
+        block_ids: vec![],
+        valid_from: Some(&today),
+    };
+    let kind = TravelFactType::try_parse(&fact_type).unwrap_or_default();
+    state.db.insert_fact(&place_id, kind, text, None, 1.0, &source, DataOrigin::User).map_err(err)
+}
+
+/// Links a place (an existing saved one, or a new one from Apple Maps) to a Reel.
+#[tauri::command]
+pub async fn add_place_to_reel(state: State<'_, AppState>, reel_id: String, candidate: PlaceCandidate) -> CmdResult<String> {
+    let db = &state.db;
+    let place_id = match merge::find_match(db, &candidate, &[]).map_err(err)? {
+        merge::PlaceMatch::Same(p) => p.id,
+        _ => db.insert_place(&candidate, candidate.category_hint().unwrap_or_default(), Verification::UserVerified, DataOrigin::User, &[])
+            .map_err(err)?.id,
+    };
+    db.link_reel(&place_id, &reel_id, &candidate.name, 1.0, DataOrigin::User).map_err(err)?;
+    db.set_place_user_verified(&place_id).map_err(err)?;
+    Ok(place_id)
+}
+
+/// Removes a place from a Reel (the place stays if it has other sources or your own data).
+#[tauri::command]
+pub async fn remove_place_from_reel(state: State<'_, AppState>, place_id: String, reel_id: String) -> CmdResult<()> {
+    state.db.unlink_reel(&place_id, &reel_id).map_err(err)
+}

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { openUrl } from "../../lib/open";
 import { fileUrl, ReelService } from "../../api/services";
 import { CategoryChip, ErrorNote, PlaceLine, Pill, Thumb } from "../../components/common";
-import { FACT, formatDate, formatTime, PROCESSING, SOURCE_KIND } from "../../lib/labels";
+import { AddFact, FactRow } from "../../components/FactsEditor";
+import { PlaceSearchDialog } from "../../components/PlacePicker";
+import { formatDate, formatTime, PROCESSING, SOURCE_KIND } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { PhotosVideoPicker } from "./ImportReelDialog";
 import { ReelStages, TranscriptLanguage } from "./ReelStages";
@@ -15,6 +17,7 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const [picker, setPicker] = useState(false);
+  const [addingPlace, setAddingPlace] = useState(false);
   const [current, setCurrent] = useState(seek ?? -1);
 
   const jump = (t: number) => {
@@ -99,12 +102,16 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
           </div>
 
           <div className="card">
-            <h3>Places</h3>
+            <div className="row"><h3 className="grow">Places</h3><button className="btn small" onClick={() => setAddingPlace(true)}>＋ Add place</button></div>
             {data.places.length === 0 && <p className="muted small">{busy ? "Working on it…" : "No place found."}</p>}
             {data.places.map((p) => (
               <div key={p.id} className="candidate" style={{ cursor: "pointer" }} onClick={() => nav.openPlace(p.id)}>
                 <div><div className="strong">{p.canonicalName}</div><PlaceLine place={p} /></div>
-                <CategoryChip category={p.category} />
+                <span className="row">
+                  <CategoryChip category={p.category} />
+                  <button className="btn small ghost" title="This Reel isn't about this place"
+                          onClick={(e) => { e.stopPropagation(); void action.run(() => ReelService.removePlace(p.id, id)); }}>Remove</button>
+                </span>
               </div>
             ))}
             {data.reviews.some((rv) => !rv.isResolved) && (
@@ -112,18 +119,17 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
             )}
           </div>
 
-          {data.facts.length > 0 && (
+          {(data.facts.length > 0 || data.places.length > 0) && (
             <div className="card">
               <h3>Extracted information</h3>
               {data.facts.map((f) => (
-                <div key={f.id} className="fact">
-                  <div className="fact-text">{FACT[f.type]?.emoji} {f.text}</div>
+                <FactRow key={f.id} fact={f} source={
                   <div className="fact-source">
                     <span>{SOURCE_KIND[f.sourceKind] ?? f.sourceKind}</span>
                     {f.sourceTimeSec != null && <button onClick={() => jump(f.sourceTimeSec!)}>{formatTime(f.sourceTimeSec)} ▶</button>}
-                  </div>
-                </div>
+                  </div>} />
               ))}
+              <AddFact places={data.places} reelId={id} />
             </div>
           )}
         </div>
@@ -144,6 +150,10 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
       )}
 
       {picker && <PhotosVideoPicker reelId={id} onClose={() => setPicker(false)} />}
+      {addingPlace && (
+        <PlaceSearchDialog title="Add a place to this Reel" onClose={() => setAddingPlace(false)}
+          onPick={async (c) => { setAddingPlace(false); await action.run(() => ReelService.addPlace(id, c)); }} />
+      )}
     </div>
   );
 }

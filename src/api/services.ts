@@ -59,6 +59,10 @@ export const PlaceService = {
     invoke<string>("split_place", { placeId, screenshotIds, candidate }),
   removeScreenshot: (placeId: string, screenshotId: string) => invoke<void>("remove_place_screenshot", { placeId, screenshotId }),
   deleteFact: (id: string) => invoke<void>("delete_fact", { id }),
+  /** Edit a tip; it becomes yours and survives reprocessing. */
+  updateFact: (id: string, text: string, factType: string) => invoke<void>("update_fact", { id, text, factType }),
+  addFact: (placeId: string, factType: string, text: string, screenshotId: string | null, reelId: string | null) =>
+    invoke<string>("add_fact", { placeId, factType, text, screenshotId, reelId }),
   removeImage: (id: string) => invoke<void>("remove_image", { id }),
   summarize: (id: string) => invoke<string>("summarize_place", { id }),
   /** Map provider search — coordinates always come from here, never from AI. */
@@ -134,6 +138,8 @@ export const ReelService = {
   /** Re-transcribe with a language ("auto" to detect again); the extraction is updated afterwards. */
   retranscribe: (id: string, locale: string) => invoke<void>("retranscribe_reel", { id, locale }),
   speechLocales: () => invoke<SpeechLocale[]>("speech_locales"),
+  addPlace: (reelId: string, candidate: PlaceCandidate) => invoke<string>("add_place_to_reel", { reelId, candidate }),
+  removePlace: (placeId: string, reelId: string) => invoke<void>("remove_place_from_reel", { placeId, reelId }),
 };
 
 export const LibraryService = {

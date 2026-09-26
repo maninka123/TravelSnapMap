@@ -9,6 +9,7 @@ import { CATEGORY, STATUS } from "../../lib/labels";
 import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
 import { useAction, useLoad, useNav } from "../../lib/nav";
+import { CATEGORY_GLYPHS, CategoryBadge, CategoryGlyph, pinImage } from "../../lib/categoryIcons";
 import { getMapStyleId, MAP_STYLES, resolveMapStyle, setMapStyleId, type MapStyleId } from "../../lib/mapStyle";
 
 /** Base-map labels that compete with your places: road names/shields, POIs, water lines, villages. */
@@ -84,7 +85,8 @@ export function MapView() {
     setActive(0);
     const map = mapRef.current;
     const inScope = places.filter((p) => !next || (next.kind === "country" ? p.countryCode === next.key : p.city === next.key));
-    if (map) fit(map, inScope);
+    // A city: zoom in past the clustering level so every place shows with its own icon.
+    if (map) fit(map, inScope, next?.kind === "city" ? CITY_ZOOM : undefined);
   };
 
   const pick = (s: Suggestion) => {
@@ -118,7 +120,12 @@ export function MapView() {
     map.on("style.load", () => {
       const dark = resolveMapStyle(getMapStyleId()).dark;
       quietBasemap(map);
-      map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 50, clusterMaxZoom: 13 });
+      map.addSource("places", { type: "geojson", data: toGeoJSON(placesRef.current), cluster: true, clusterRadius: 50, clusterMaxZoom: CLUSTER_MAX_ZOOM });
+      // Category pins (images are dropped whenever the style changes, so add them each time).
+      for (const c of Object.keys(CATEGORY_GLYPHS)) {
+        if (!map.hasImage(`pin-${c}`)) map.addImage(`pin-${c}`, pinImage(c), { pixelRatio: 2 });
+        if (!map.hasImage(`pin-sel-${c}`)) map.addImage(`pin-sel-${c}`, pinImage(c, true), { pixelRatio: 2 });
+      }
       // Clusters: size by count (1–4 · 5–14 · 15–29 · 30+) with a soft translucent ring.
       const size = ["step", ["get", "point_count"], 15, 5, 19, 15, 24, 30, 29] as unknown as number;
       map.addLayer({
@@ -134,34 +141,23 @@ export function MapView() {
         layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 13, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true },
         paint: { "text-color": "#ffffff" },
       });
-      // Single places: category colour, soft halo, white outline. The selected one grows.
+      // Single places: a category icon badge. The selected one is larger.
       map.addLayer({
-        id: "place-halo", type: "circle", source: "places", filter: ["!", ["has", "point_count"]],
-        paint: { "circle-color": ["get", "color"], "circle-radius": 12, "circle-opacity": 0.18 },
+        id: "place-points", type: "symbol", source: "places", filter: ["!", ["has", "point_count"]],
+        layout: { "icon-image": ["concat", "pin-", ["get", "category"]], "icon-allow-overlap": true, "icon-ignore-placement": true },
+        paint: { "icon-opacity": ["case", ["==", ["get", "status"], "notInterested"], 0.4, 1] },
       });
       map.addLayer({
-        id: "place-points", type: "circle", source: "places", filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-color": ["get", "color"], "circle-radius": 7, "circle-stroke-width": 2.5, "circle-stroke-color": "#ffffff",
-          "circle-opacity": ["case", ["==", ["get", "status"], "notInterested"], 0.35, 1],
-        },
-      });
-      map.addLayer({
-        id: "place-selected-shadow", type: "circle", source: "places", filter: ["==", ["get", "id"], ""],
-        paint: { "circle-color": "#000000", "circle-radius": 16, "circle-opacity": 0.22, "circle-blur": 0.9, "circle-translate": [0, 2] },
-      });
-      map.addLayer({
-        id: "place-selected", type: "circle", source: "places", filter: ["==", ["get", "id"], ""],
-        paint: { "circle-color": ["get", "color"], "circle-radius": 11, "circle-stroke-width": 3.5, "circle-stroke-color": "#ffffff" },
+        id: "place-selected", type: "symbol", source: "places", filter: ["==", ["get", "id"], ""],
+        layout: { "icon-image": ["concat", "pin-sel-", ["get", "category"]], "icon-allow-overlap": true, "icon-ignore-placement": true },
       });
       map.addLayer({
         id: "place-labels", type: "symbol", source: "places", filter: ["!", ["has", "point_count"]], minzoom: 9,
-        layout: { "text-field": ["get", "name"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top", "text-font": ["Noto Sans Bold"], "text-max-width": 10 },
+        layout: { "text-field": ["get", "name"], "text-size": 12, "text-offset": [0, 1.3], "text-anchor": "top", "text-font": ["Noto Sans Bold"], "text-max-width": 10 },
         paint: { "text-color": dark ? "#f2f2f7" : "#1c1c1e", "text-halo-color": dark ? "#1c1c1e" : "#ffffff", "text-halo-width": 1.6 },
       });
       const sel = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selectedRef.current]] as maplibregl.FilterSpecification;
       map.setFilter("place-selected", sel);
-      map.setFilter("place-selected-shadow", sel);
     });
 
     map.on("load", () => {
@@ -215,7 +211,6 @@ export function MapView() {
     if (!map?.getLayer("place-selected")) return;
     const filter = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selected?.id ?? ""]] as maplibregl.FilterSpecification;
     map.setFilter("place-selected", filter);
-    map.setFilter("place-selected-shadow", filter);
   }, [selected]);
 
   const filterCount = categories.length + statuses.length;
@@ -260,11 +255,9 @@ export function MapView() {
                           className={`suggest-row ${i === active ? "active" : ""}`}
                           onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => pick(s)}>
                     {s.kind === "place" ? (
-                      <span className="result-icon" style={{ background: `${(CATEGORY[s.place.category] ?? CATEGORY.other).color}22` }}>
-                        {(CATEGORY[s.place.category] ?? CATEGORY.other).emoji}
-                      </span>
+                      <CategoryBadge category={s.place.category} size={30} />
                     ) : s.kind === "country" ? <span className="result-icon"><Flag code={s.key} name={s.label} /></span>
-                      : <span className="result-icon">🏙️</span>}
+                      : <CategoryBadge category="city" size={30} />}
                     <span className="suggest-text">
                       <span className="suggest-name"><Highlight text={s.label} query={search} /></span>
                       <span className="suggest-sub">{s.sub}</span>
@@ -407,7 +400,7 @@ function FiltersPopover({ places, categories, statuses, setCategories, setStatus
         <div className="filters-chips">
           {[...byCat.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => (
             <button key={c} className={`chip-btn ${categories.includes(c) ? "active" : ""}`} onClick={() => setCategories(toggle(categories, c))}>
-              <span className="cat-dot" style={{ background: CATEGORY[c]?.color }} /> {CATEGORY[c]?.label ?? c} <span className="chip-count">{n}</span>
+              <CategoryBadge category={c} size={18} /> {CATEGORY[c]?.label ?? c} <span className="chip-count">{n}</span>
             </button>
           ))}
         </div>
@@ -463,12 +456,12 @@ function AreaPanel({ places, selectedId, map, onPick, onClose, onFitAll, onCount
           </button>
         ) : (
           <section key={g.label}>
-            <button className="area-city" onClick={() => map && fit(map, g.items)}>{g.label} <span>{g.items.length}</span></button>
+            <button className="area-city" onClick={() => map && fit(map, g.items, CITY_ZOOM)}>{g.label} <span>{g.items.length}</span></button>
             {g.items.map((p) => {
               const cat = CATEGORY[p.category] ?? CATEGORY.other;
               return (
                 <button key={p.id} className={`area-place ${selectedId === p.id ? "active" : ""}`} onClick={() => onPick(p)}>
-                  <span className="area-dot" style={{ background: cat.color }} />
+                  <CategoryBadge category={p.category} size={24} />
                   <span className="grow area-place-text">
                     <span className="area-place-name">{p.canonicalName}</span>
                     <span className="area-place-sub">{cat.label} · {p.sourceCount} source{p.sourceCount === 1 ? "" : "s"}{p.memoryCount ? ` · 📷 ${p.memoryCount}` : ""}</span>
@@ -492,11 +485,11 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
   return (
     <div className="map-preview" key={place.id}>
       <div className="map-preview-hero">
-        <Thumb path={hero} fallback={<span className="map-preview-fallback">{cat.emoji}</span>} />
+        <Thumb path={hero} fallback={<CategoryBadge category={place.category} size={64} />} />
         <div className="map-preview-shade" />
         <button className="map-preview-close" onClick={onClose} aria-label="Close">✕</button>
         <div className="map-preview-title">
-          <span className="map-preview-kind" style={{ background: cat.color }}>{cat.emoji} {cat.label}</span>
+          <span className="map-preview-kind" style={{ background: cat.color }}><CategoryGlyph category={place.category} size={12} strokeWidth={2.4} /> {cat.label}</span>
           <h3>{place.canonicalName}</h3>
         </div>
       </div>
@@ -617,20 +610,26 @@ function toGeoJSON(places: Place[]): GeoJSON.FeatureCollection {
     features: places.map((p) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [p.longitude, p.latitude] },
-      properties: { id: p.id, name: p.canonicalName, color: (CATEGORY[p.category] ?? CATEGORY.other).color, status: p.personalStatus },
+      properties: { id: p.id, name: p.canonicalName, category: CATEGORY_GLYPHS[p.category] ? p.category : "other", status: p.personalStatus },
     })),
   };
 }
 
-function fit(map: MLMap, places: Place[]) {
+/** Places are clustered up to this zoom; from here on every place is its own icon. */
+const CLUSTER_MAX_ZOOM = 9;
+const CITY_ZOOM = CLUSTER_MAX_ZOOM + 1;
+
+function fit(map: MLMap, places: Place[], minZoom?: number) {
   if (places.length === 0) return;
   if (places.length === 1) {
-    map.easeTo({ center: [places[0].longitude, places[0].latitude], zoom: 12 });
+    map.easeTo({ center: [places[0].longitude, places[0].latitude], zoom: Math.max(12, minZoom ?? 0) });
     return;
   }
   const bounds = new maplibregl.LngLatBounds();
   places.forEach((p) => bounds.extend([p.longitude, p.latitude]));
-  map.fitBounds(bounds, { padding: 80, maxZoom: 13, duration: 600 });
+  const camera = map.cameraForBounds(bounds, { padding: 80, maxZoom: 14 });
+  if (!camera) return;
+  map.easeTo({ ...camera, zoom: Math.max(camera.zoom ?? 0, minZoom ?? 0), duration: 600 });
 }
 
 /** First-run guidance: permission → AI key → scan. */

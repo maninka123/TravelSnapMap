@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ReviewService } from "../../api/services";
 import type { PlaceCandidate, ReviewEntry } from "../../api/types";
-import { CandidateRow, Empty, ErrorNote, PlaceLine, PlaceSearchDialog, Thumb } from "../../components/common";
+import { CandidateRow, Empty, ErrorNote, PlaceLine, Thumb } from "../../components/common";
+import { PlaceSearchDialog } from "../../components/PlacePicker";
 import { formatDate } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 
@@ -17,14 +18,25 @@ const TITLES: Record<string, string> = {
 export function ReviewView() {
   const { data: entries = [], error } = useLoad(() => ReviewService.list(), []);
   const [filter, setFilter] = useState("");
-  const counts = entries.reduce<Record<string, number>>((m, e) => ({ ...m, [e.review.kind]: (m[e.review.kind] ?? 0) + 1 }), {});
-  const shown = entries.filter((e) => !filter || e.review.kind === filter);
+  const [source, setSource] = useState<"all" | "screenshots" | "reels">("all");
+  const bySource = entries.filter((e) => source === "all" || (source === "reels" ? !!e.review.reelId : !e.review.reelId));
+  const reelCount = entries.filter((e) => e.review.reelId).length;
+  const counts = bySource.reduce<Record<string, number>>((m, e) => ({ ...m, [e.review.kind]: (m[e.review.kind] ?? 0) + 1 }), {});
+  const shown = bySource.filter((e) => !filter || e.review.kind === filter);
 
   return (
     <div className="page">
-      <div className="page-head"><h2>Review</h2><span className="muted">{entries.length} open</span></div>
+      <div className="page-head">
+        <h2>Review</h2><span className="muted">{entries.length} open</span>
+        <span className="spacer" />
+        <div className="segmented">
+          <button className={source === "all" ? "active" : ""} onClick={() => { setSource("all"); setFilter(""); }}>All {entries.length}</button>
+          <button className={source === "screenshots" ? "active" : ""} onClick={() => { setSource("screenshots"); setFilter(""); }}>📸 Screenshots {entries.length - reelCount}</button>
+          <button className={source === "reels" ? "active" : ""} onClick={() => { setSource("reels"); setFilter(""); }}>🎬 Reels {reelCount}</button>
+        </div>
+      </div>
       <div className="toolbar">
-        <button className={`chip-btn ${!filter ? "active" : ""}`} onClick={() => setFilter("")}>All</button>
+        <button className={`chip-btn ${!filter ? "active" : ""}`} onClick={() => setFilter("")}>All kinds</button>
         {Object.entries(counts).map(([k, n]) => (
           <button key={k} className={`chip-btn ${filter === k ? "active" : ""}`} onClick={() => setFilter(k)}>{TITLES[k]} {n}</button>
         ))}
