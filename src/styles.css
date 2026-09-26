@@ -616,3 +616,5 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .sidebar-foot { display: flex; flex-direction: column; gap: 2px; }
 .link-btn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-align: left; }
 .link-btn:hover { text-decoration: underline; }
+
+.pb-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; }

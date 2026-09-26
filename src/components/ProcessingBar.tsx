@@ -33,15 +33,21 @@ export function ProcessingBar() {
           {snap.running ? (snap.paused ? "⏸ Paused" : "⏳ Scanning screenshots") : snap.lastError ? "⚠️ " + snap.lastError : "✓ " + snap.phase}
         </div>
         <div className="pb-stats">
-          {snap.inPhotos > 0 && <span>{snap.inPhotos.toLocaleString()} screenshots · {snap.alreadyKnown.toLocaleString()} known · {snap.newlyDiscovered.toLocaleString()} new</span>}
-          <span>Processed {snap.processed}/{snap.total}</span>
-          <span>Travel {snap.travel}</span>
-          <span>Not travel {snap.notTravel}</span>
-          {snap.needsReview > 0 && <span>Needs review {snap.needsReview}</span>}
-          {snap.failed > 0 && <span className="bad">Failed {snap.failed}</span>}
-          {snap.waiting > 0 && <span>Waiting {snap.waiting}</span>}
-          {snap.running && <span>Remaining {snap.remaining}</span>}
+          <span className="strong">{snap.processed.toLocaleString()} of {snap.total.toLocaleString()} done{snap.running ? ` · ${snap.remaining.toLocaleString()} left` : ""}</span>
+          {snap.processed > 0 && (
+            <span>
+              {snap.travel} travel{snap.needsReview > 0 ? ` (${snap.needsReview} to review)` : ""} · {snap.notTravel} not travel
+              {snap.failed > 0 && <span className="bad"> · {snap.failed} failed</span>}
+              {snap.waiting > 0 && <> · {snap.waiting} waiting for iCloud</>}
+            </span>
+          )}
         </div>
+        {snap.running && snap.total > snap.newlyDiscovered && (
+          <div className="pb-note">
+            {snap.newlyDiscovered > 0 ? `${snap.newlyDiscovered.toLocaleString()} new + ` : ""}
+            {(snap.total - snap.newlyDiscovered).toLocaleString()} unfinished from earlier. Screenshots already done are skipped — nothing is processed twice.
+          </div>
+        )}
         {snap.running && <div className="progress"><div style={{ width: `${pct}%` }} /></div>}
       </div>
       <div className="pb-actions">
