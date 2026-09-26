@@ -495,16 +495,6 @@ export interface CostSummary {
   projectedRemaining: number;
 }
 
-/** Smart Search: how the query was understood, and the matching places with the facts that matched. */
-export interface SearchChip {
-  kind: "country" | "city" | "category" | "source" | "creator" | "status" | "concept" | "term";
-  label: string;
-  emoji: string | null;
-  code: string | null;
-}
-export interface SearchHit { place: Place; matches: Fact[]; score: number }
-export interface SmartSearchResult { chips: SearchChip[]; hits: SearchHit[] }
-
 /** "Ticket price saved 18 months ago", "Two sources give different opening times"… */
 export interface PlaceWarning {
   kind: "stale" | "conflict";

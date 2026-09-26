@@ -87,11 +87,8 @@ For production, set **Settings → API base URL** to your own backend proxy so t
   Japanese, Chinese, Korean, Tamil and every other language Apple supports on your Mac (Sinhala isn't supported by
   Apple speech recognition — its caption and on-screen text are still used).
 
-- **🔎 Smart Search** (Map and Places) — ask like you'd ask a friend: *“Places in Japan good for sunrise”*,
-  *“Restaurants I saved from Instagram in Tokyo”*, *“Where someone mentioned avoiding crowds”*, *“Things requiring
-  advance booking”*. The query is understood locally (countries, your cities, kinds of place, sources and @creators,
-  visited / not visited, and ~25 travel ideas such as sunrise, crowds, booking, free, photo spots, rainy day, seasons)
-  and matched against your saved facts — no AI call, no embeddings, instant. Each result shows the fact that matched.
+- **🔎 Search with suggestions** (Map) — as you type, matching places, cities and countries appear under the search
+  field (↑/↓ and ↩ work); picking one flies the map there.
 - **＋ Add Place** — a place you know without a screenshot or Reel: search Apple Maps, pick the result, choose
   Want to Visit (or another status) and save. Already saved? You're taken to the existing place instead.
 - **⚠️ Before you go** — saved info that may be out of date or that disagrees: *“Ticket price saved 18 months ago”*,
@@ -198,7 +195,7 @@ TODO.md                   Build progress checklist
 ## Tests
 
 ```bash
-cd src-tauri && cargo test          # 83 tests (+3 opt-in live tests): pipelines with mocks, real-data regressions, migrations, backup, pricing, Smart Search, warnings
+cd src-tauri && cargo test          # 81 tests (+3 opt-in live tests): pipelines with mocks, real-data regressions, migrations, backup, pricing, warnings
 # Live checks (use your key; tiny cost):
 TSM_LIVE_IMAGE=/path/to/screenshot.jpg cargo test live_screenshot -- --ignored --nocapture
 TSM_LIVE_COUNT=100 TSM_LIVE_DB=/tmp/v.sqlite cargo test live_photos -- --ignored --nocapture   # real Photos sample

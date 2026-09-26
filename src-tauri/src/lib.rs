@@ -210,7 +210,6 @@ pub fn run() {
             commands::correct_place,
             commands::save_manual_crop,
             commands::search_map,
-            commands::smart_search,
             commands::place_warnings,
             commands::add_manual_place,
             commands::photos_near_place,

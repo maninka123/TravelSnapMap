@@ -1,5 +1,5 @@
 //! After-trip memories: your own photos from Photos attached to a visited place, plus the
-//! cross-place reads used by Smart Search and the freshness/conflict warnings.
+//! library-wide fact read used by the freshness/conflict warnings.
 
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension, Row};
@@ -38,15 +38,6 @@ impl MemoryRecord {
             created_at: r.get(8)?,
         })
     }
-}
-
-/// Where a place's evidence came from, for "saved from Instagram" style searches.
-#[derive(Debug, Clone, Default)]
-pub struct PlaceProvenance {
-    pub source_types: Vec<String>,
-    pub creators: Vec<String>,
-    pub has_reel: bool,
-    pub has_screenshot: bool,
 }
 
 pub struct NewMemory<'a> {
@@ -117,33 +108,5 @@ impl Database {
             let rows = stmt.query_map([], FactRecord::from_row)?;
             rows.collect()
         })
-    }
-
-    pub fn place_provenance(&self) -> Result<std::collections::HashMap<String, PlaceProvenance>> {
-        let mut map: std::collections::HashMap<String, PlaceProvenance> = std::collections::HashMap::new();
-        self.with(|c| {
-            let mut stmt = c.prepare(
-                "SELECT ps.place_id, s.source_type, s.creator FROM place_screenshots ps JOIN screenshots s ON s.id = ps.screenshot_id",
-            )?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?)))?;
-            for row in rows {
-                let (id, source, creator) = row?;
-                let e = map.entry(id).or_default();
-                e.has_screenshot = true;
-                e.source_types.extend(source);
-                e.creators.extend(creator);
-            }
-            let mut stmt = c.prepare("SELECT pr.place_id, rl.creator FROM place_reels pr JOIN reels rl ON rl.id = pr.reel_id")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
-            for row in rows {
-                let (id, creator) = row?;
-                let e = map.entry(id).or_default();
-                e.has_reel = true;
-                e.source_types.push("instagram".into());
-                e.creators.extend(creator);
-            }
-            Ok(())
-        })?;
-        Ok(map)
     }
 }

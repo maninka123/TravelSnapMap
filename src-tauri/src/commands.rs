@@ -603,13 +603,7 @@ pub async fn import_reels_from_file(state: State<'_, AppState>, path: String) ->
     import_many(&state, &String::from_utf8_lossy(&bytes))
 }
 
-// MARK: Smart Search, quick add, warnings and after-trip memories
-
-/// Natural-language search over your saved places and facts ("restaurants from Instagram in Tokyo").
-#[tauri::command]
-pub async fn smart_search(state: State<'_, AppState>, query: String, verified_only: bool) -> CmdResult<crate::insights::SmartSearchResult> {
-    crate::insights::smart_search(&state.db, &query, verified_only).map_err(err)
-}
+// MARK: Quick add, warnings and after-trip memories
 
 /// Freshness and conflict warnings for every place that has any.
 #[tauri::command]

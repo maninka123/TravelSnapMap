@@ -5,7 +5,6 @@ import { ScanControls } from "../../components/ScanControls";
 import { PlaceService } from "../../api/services";
 import type { Place, PlaceCategory, PersonalStatus } from "../../api/types";
 import { Flag, Thumb } from "../../components/common";
-import { MatchSnippet, SEARCH_EXAMPLES, SearchChips, useSmartSearch } from "../../components/SmartSearch";
 import { CATEGORY, STATUS } from "../../lib/labels";
 import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
@@ -24,25 +23,40 @@ export function MapView() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Place>();
   const [adding, setAdding] = useState(false);
-  const [showResults, setShowResults] = useState(true);
-  const { result: smart, busy: searching } = useSmartSearch(search, true);
-  const hitIds = useMemo(() => (smart ? new Set(smart.hits.map((h) => h.place.id)) : undefined), [smart]);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [active, setActive] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | undefined>(undefined);
   const placesRef = useRef<Place[]>([]);
 
-  const filtered = useMemo(() => places.filter((p) =>
-    (!category || p.category === category) &&
-    (!status || p.personalStatus === status) &&
-    (!country || p.countryCode === country) &&
-    (!hitIds || hitIds.has(p.id))), [places, category, status, country, hitIds]);
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return places.filter((p) =>
+      (!category || p.category === category) &&
+      (!status || p.personalStatus === status) &&
+      (!country || p.countryCode === country) &&
+      (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q)));
+  }, [places, category, status, country, search]);
 
-  // Zoom to the results of each new search.
-  useEffect(() => {
+  const suggestions = useMemo(() => suggest(places, search), [places, search]);
+
+  const pick = (s: Suggestion) => {
+    setSuggestOpen(false);
     const map = mapRef.current;
-    if (map && smart && smart.hits.length > 0) fit(map, smart.hits.map((h) => h.place));
-  }, [smart]);
+    if (s.kind === "place") {
+      setSearch(s.place.canonicalName);
+      setSelected(s.place);
+      map?.easeTo({ center: [s.place.longitude, s.place.latitude], zoom: Math.max(map.getZoom(), 12) });
+    } else if (s.kind === "country") {
+      setSearch("");
+      setCountry(s.key);
+      if (map) fit(map, places.filter((p) => p.countryCode === s.key));
+    } else {
+      setSearch(s.label);
+      if (map) fit(map, places.filter((p) => p.city === s.label));
+    }
+  };
 
   const countries = useMemo(() => {
     const counts = new Map<string, { code: string; name: string; count: number }>();
@@ -126,57 +140,61 @@ export function MapView() {
     <div className="map-wrap">
       <div ref={containerRef} className="map" />
       <div className="map-overlay">
-        <div className="map-filters">
-          <div className="smart-search-field">
-            <span className="smart-search-icon">{searching ? "…" : "🔎"}</span>
-            <input placeholder="Ask your map — e.g. “sunrise spots in Japan”" value={search}
-                   onChange={(e) => { setSearch(e.target.value); setShowResults(true); }} onFocus={() => setShowResults(true)} />
-            {search && <button className="icon-btn small" aria-label="Clear search" onClick={() => setSearch("")}>✕</button>}
+        <div className="map-toolbar">
+          <div className="map-search-wrap">
+            <label className="map-search">
+              <SearchIcon />
+              <input placeholder="Search places, cities, countries" value={search}
+                     onChange={(e) => { setSearch(e.target.value); setSuggestOpen(true); setActive(0); }}
+                     onFocus={() => setSuggestOpen(true)}
+                     onBlur={() => setTimeout(() => setSuggestOpen(false), 120)}
+                     onKeyDown={(e) => {
+                       if (!suggestions?.length) return;
+                       if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, suggestions.length - 1)); }
+                       else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+                       else if (e.key === "Enter") { e.preventDefault(); pick(suggestions[active]); }
+                       else if (e.key === "Escape") setSuggestOpen(false);
+                     }} />
+              {search && <button className="map-search-clear" aria-label="Clear search" onMouseDown={(e) => e.preventDefault()} onClick={() => { setSearch(""); setCountry(""); }}>✕</button>}
+            </label>
+            {suggestOpen && suggestions && (
+              <div className="search-suggest" role="listbox">
+                {suggestions.length === 0 && <div className="search-suggest-empty">No saved places match “{search.trim()}”</div>}
+                {suggestions.map((s, i) => (
+                  <button key={`${s.kind}-${s.key}`} role="option" aria-selected={i === active}
+                          className={`suggest-row ${i === active ? "active" : ""}`}
+                          onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => pick(s)}>
+                    {s.kind === "place" ? (
+                      <span className="result-icon" style={{ background: `${(CATEGORY[s.place.category] ?? CATEGORY.other).color}22` }}>
+                        {(CATEGORY[s.place.category] ?? CATEGORY.other).emoji}
+                      </span>
+                    ) : s.kind === "country" ? <span className="result-icon"><Flag code={s.key} name={s.label} /></span>
+                      : <span className="result-icon">🏙️</span>}
+                    <span className="suggest-text">
+                      <span className="suggest-name"><Highlight text={s.label} query={search} /></span>
+                      <span className="suggest-sub">{s.sub}</span>
+                    </span>
+                    <span className="suggest-kind">{s.kind === "place" ? "" : s.kind === "city" ? "City" : "Country"}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <select value={category} onChange={(e) => setCategory(e.target.value as PlaceCategory | "")}>
-            <option value="">All categories</option>
+            <option value="">All kinds</option>
             {Object.entries(CATEGORY).map(([k, c]) => <option key={k} value={k}>{c.emoji} {c.label}</option>)}
           </select>
           <select value={status} onChange={(e) => setStatus(e.target.value as PersonalStatus | "")}>
             <option value="">Any status</option>
             {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
           </select>
-          <span className="muted small" style={{ alignSelf: "center" }}>{filtered.length} places</span>
-          <button className="btn small" onClick={() => setAdding(true)}>＋ Add place</button>
+          <span className="map-count">{filtered.length} place{filtered.length === 1 ? "" : "s"}</span>
+          <button className="btn primary small" onClick={() => setAdding(true)}>＋ Add place</button>
         </div>
-        {!search && places.length > 0 && (
-          <div className="search-examples">
-            {SEARCH_EXAMPLES.map((ex) => <button key={ex} className="chip-btn" onClick={() => setSearch(ex)}>{ex}</button>)}
-          </div>
-        )}
-        {smart && showResults && (
-          <div className="smart-results material">
-            <div className="row">
-              <SearchChips chips={smart.chips} count={smart.hits.length} />
-              <span className="grow" />
-              <button className="icon-btn small" title="Hide list" onClick={() => setShowResults(false)}>▾</button>
-            </div>
-            <div className="smart-results-list">
-              {smart.hits.slice(0, 40).map((h) => (
-                <button key={h.place.id} className="smart-result" onClick={() => {
-                  setSelected(h.place);
-                  mapRef.current?.easeTo({ center: [h.place.longitude, h.place.latitude], zoom: Math.max(mapRef.current.getZoom(), 12) });
-                }}>
-                  <Thumb path={h.place.heroImagePath ?? h.place.thumbnailPath} fallback={CATEGORY[h.place.category]?.emoji} />
-                  <div className="grow">
-                    <div className="strong">{h.place.canonicalName}</div>
-                    <div className="muted small"><Flag code={h.place.countryCode} name={h.place.country} /> {[h.place.city, h.place.country].filter(Boolean).join(", ")}</div>
-                    {h.matches[0] && <MatchSnippet fact={h.matches[0]} />}
-                  </div>
-                </button>
-              ))}
-              {smart.hits.length === 0 && <p className="muted small">Nothing saved matches that yet. Try fewer words, or a country or kind of place.</p>}
-            </div>
-          </div>
-        )}
+
         {countries.length > 0 && (
-          <div className="country-chips">
-            {countries.slice(0, 14).map((c) => (
+          <div className="map-chip-row">
+            {countries.map((c) => (
               <button key={c.code} className={`chip-btn ${country === c.code ? "active" : ""}`} onClick={() => focusCountry(c.code)} title={c.name}>
                 <Flag code={c.code} name={c.name} /> {c.count}
               </button>
@@ -229,6 +247,60 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
         </div>
       </div>
     </div>
+  );
+}
+
+type Suggestion =
+  | { kind: "place"; key: string; label: string; sub: string; place: Place }
+  | { kind: "city" | "country"; key: string; label: string; sub: string };
+
+/** Suggestions while typing: names starting with the text first, then words starting with it, then anywhere. */
+function suggest(places: Place[], query: string): Suggestion[] | undefined {
+  const q = query.toLowerCase().trim();
+  if (!q) return undefined;
+  const rank = (text: string | null | undefined) => {
+    const t = (text ?? "").toLowerCase();
+    if (t.startsWith(q)) return 0;
+    if (t.split(/[\s,()-]+/).some((w) => w.startsWith(q))) return 1;
+    return t.includes(q) ? 2 : 9;
+  };
+  const scored: [number, Suggestion][] = [];
+  const countries = new Map<string, { name: string; count: number }>();
+  const cities = new Map<string, { country: string | null; count: number }>();
+  for (const p of places) {
+    if (p.countryCode && p.country) countries.set(p.countryCode, { name: p.country, count: (countries.get(p.countryCode)?.count ?? 0) + 1 });
+    if (p.city && p.city !== p.canonicalName) cities.set(p.city, { country: p.country, count: (cities.get(p.city)?.count ?? 0) + 1 });
+    const r = Math.min(rank(p.canonicalName), ...p.alternativeNames.map(rank));
+    if (r < 9) {
+      const cat = CATEGORY[p.category] ?? CATEGORY.other;
+      scored.push([r, { kind: "place", key: p.id, label: p.canonicalName, sub: [cat.label, p.city !== p.canonicalName ? p.city : null, p.country].filter(Boolean).join(" · "), place: p }]);
+    }
+  }
+  for (const [code, c] of countries) {
+    const r = Math.min(rank(c.name), code.toLowerCase() === q ? 0 : 9);
+    if (r < 9) scored.push([r - 0.5, { kind: "country", key: code, label: c.name, sub: `${c.count} saved place${c.count === 1 ? "" : "s"}` }]);
+  }
+  for (const [city, c] of cities) {
+    const r = rank(city);
+    if (r < 9) scored.push([r - 0.25, { kind: "city", key: city, label: city, sub: [c.country, `${c.count} place${c.count === 1 ? "" : "s"}`].filter(Boolean).join(" · ") }]);
+  }
+  return scored.sort((a, b) => a[0] - b[0] || a[1].label.localeCompare(b[1].label)).slice(0, 8).map(([, s]) => s);
+}
+
+/** Bold the typed part of a suggestion. */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return <>{text}</>;
+  return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
+}
+
+function SearchIcon() {
+  return (
+    <svg className="map-search-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M11 11l3.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   );
 }
 
