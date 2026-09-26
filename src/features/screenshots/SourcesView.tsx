@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LibraryService, ProcessingService, ScreenshotService } from "../../api/services";
 import type { ScreenshotView } from "../../api/types";
 import { Empty, Pill, Thumb } from "../../components/common";
@@ -46,8 +46,14 @@ export function SourcesView() {
   }, [view, search]);
   const shownShots = items.filter((i) => i.kind === "screenshot").length;
   const shown = items.filter((i) => kind === "all" || i.kind === kind);
-  // The viewer steps through exactly what's shown here, in this order.
-  const list = shown.map((i) => (i.kind === "reel" ? { type: "reel" as const, id: i.reel.id } : { type: "screenshot" as const, id: i.screenshot.id }));
+  // The viewer steps through the whole tab (not just the loaded page), in the same order as the grid.
+  const { data: shotRefs } = useLoad(() => ScreenshotService.refs(view, search), [view, search]);
+  const list = useMemo(() => {
+    if (!shotRefs) return shown.map((i) => (i.kind === "reel" ? { type: "reel" as const, id: i.reel.id } : { type: "screenshot" as const, id: i.screenshot.id }));
+    const reels = kind === "screenshot" ? [] : items.flatMap((i) => (i.kind === "reel" ? [{ type: "reel" as const, id: i.reel.id, date: i.date ?? "" }] : []));
+    const shots = kind === "reel" ? [] : shotRefs.map((r) => ({ type: "screenshot" as const, id: r.id, date: r.date ?? "" }));
+    return [...reels, ...shots].sort((a, b) => b.date.localeCompare(a.date)).map(({ type, id }) => ({ type, id }));
+  }, [shotRefs, items, shown, kind]);
 
   return (
     <div className="page">

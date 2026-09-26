@@ -235,6 +235,7 @@ pub fn run() {
             commands::remove_memory,
             commands::update_fact,
             commands::count_screenshots,
+            commands::screenshot_refs,
             commands::add_fact,
             commands::add_place_to_reel,
             commands::remove_place_from_reel,

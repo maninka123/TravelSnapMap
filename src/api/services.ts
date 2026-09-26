@@ -87,6 +87,8 @@ export type { Memory };
 export const ScreenshotService = {
   list: (view: ScreenshotView, search?: string, limit = 300) =>
     invoke<Screenshot[]>("list_screenshots", { filter: { view, search: search || null, limit } }),
+  refs: (view: ScreenshotView, search?: string) =>
+    invoke<{ id: string; date: string | null }[]>("screenshot_refs", { filter: { view, search: search || null } }),
   count: (view: ScreenshotView, search?: string) => invoke<number>("count_screenshots", { filter: { view, search: search || null } }),
   detail: (id: string) => invoke<ScreenshotDetail>("get_screenshot_detail", { id }),
   action: (id: string, action: "reprocess" | "ignore" | "markTravel" | "markNotTravel") =>

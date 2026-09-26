@@ -758,6 +758,13 @@ pub async fn count_screenshots(state: State<'_, AppState>, filter: Option<Screen
     state.db.count_screenshots(&filter.unwrap_or_default()).map_err(err)
 }
 
+/// All screenshots in a Sources view as {id, date}, in list order (for the viewer's ‹ › across the whole tab).
+#[tauri::command]
+pub async fn screenshot_refs(state: State<'_, AppState>, filter: Option<ScreenshotFilter>) -> CmdResult<Vec<Value>> {
+    Ok(state.db.screenshot_refs(&filter.unwrap_or_default()).map_err(err)?
+        .into_iter().map(|(id, date)| json!({"id": id, "date": date})).collect())
+}
+
 // MARK: Editing processed results (your edits are kept when something is reprocessed)
 
 /// Edits a saved tip/fact. It becomes yours (origin "user"), so reprocessing never overwrites it.

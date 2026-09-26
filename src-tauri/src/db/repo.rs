@@ -215,6 +215,22 @@ impl Database {
         Ok(self.with(|c| c.query_row(&sql, params![search], |r| r.get(0)))?)
     }
 
+    /// Every (id, date) in a Sources view, in list order — lets the viewer step through the whole tab.
+    pub fn screenshot_refs(&self, f: &ScreenshotFilter) -> Result<Vec<(String, Option<String>)>> {
+        let condition = Self::view_condition(f.view.as_deref().unwrap_or("all"));
+        let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));
+        let sql = format!(
+            "SELECT s.id, s.creation_date FROM screenshots s WHERE {condition} \
+             AND (?1 IS NULL OR s.ocr_full_text LIKE ?1 OR s.creator LIKE ?1 OR s.source_type LIKE ?1) \
+             ORDER BY s.creation_date DESC"
+        );
+        self.with(|c| {
+            let mut stmt = c.prepare(&sql)?;
+            let rows = stmt.query_map(params![search], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect()
+        })
+    }
+
     pub fn list_screenshots(&self, f: &ScreenshotFilter) -> Result<Vec<ScreenshotRecord>> {
         let condition = Self::view_condition(f.view.as_deref().unwrap_or("all"));
         let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));
