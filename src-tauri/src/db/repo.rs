@@ -197,7 +197,7 @@ impl Database {
             "notTravel" => "s.status = 'notTravel'",
             "failed" => "s.status = 'failed'",
             "pending" => "s.status NOT IN ('complete','notTravel','needsReview','ignored','failed')",
-            "everything" => "1 = 1",
+            "everything" => "s.status != 'ignored'",
             _ => "(s.classification IN ('travel','uncertain') OR s.user_classification = 'travel') AND s.status != 'ignored'",
         };
         let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));

@@ -109,3 +109,5 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Place picker everywhere: your saved places first ("Saved"), then Apple Maps as you type
 - [x] Review: All / Screenshots / Reels switch
 - [x] Map: 9 place groups (Food & drink, Stay, Sights, Nature, Shopping, Activities, Transport, Cities & regions, Other) with one icon set on pins, filters, badges; picking a city zooms past clustering
+- [x] Ignore: hidden for good (never reprocessed, counted as done, only under More → Ignored), for screenshots and Reels; viewer moves to the next item
+- [x] Viewer: ‹ › and ←/→ step through the Sources list

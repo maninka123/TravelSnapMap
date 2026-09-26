@@ -147,12 +147,13 @@ export const LibraryService = {
   items: async (view: ScreenshotView, search?: string): Promise<LibraryItem[]> => {
     const [shots, reels] = await Promise.all([
       ScreenshotService.list(view, search),
-      view === "all" || view === "everything" || view === "needsReview" || view === "processed" || view === "failed"
+      view === "all" || view === "everything" || view === "needsReview" || view === "processed" || view === "failed" || view === "ignored"
         ? ReelService.list() : Promise.resolve([] as Reel[]),
     ]);
     const q = search?.toLowerCase().trim();
     const reelItems: LibraryItem[] = reels
-      .filter((r) => view === "all" || view === "everything"
+      .filter((r) => (view === "ignored" ? r.status === "ignored" : r.status !== "ignored"))
+      .filter((r) => view === "all" || view === "everything" || view === "ignored"
         || (view === "needsReview" && r.status === "needsReview")
         || (view === "processed" && r.status === "complete")
         || (view === "failed" && (r.status === "failed" || r.status === "needsMedia")))

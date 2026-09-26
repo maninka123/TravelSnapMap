@@ -483,7 +483,11 @@ pub async fn import_reel_video_from_photos(state: State<'_, AppState>, reel_id: 
 pub async fn reel_action(state: State<'_, AppState>, id: String, action: String) -> CmdResult<()> {
     match action.as_str() {
         "reprocess" => spawn_reel(&state, id, true),
-        "ignore" => state.db.finish_reel(&id, ProcessingStatus::Ignored, Some("ignored by you")).map_err(err)?,
+        "ignore" => {
+            // Like screenshots: its automatic places/tips go, your own edits stay, and it's never processed again.
+            state.db.clear_reel_derived(&id).map_err(err)?;
+            state.db.finish_reel(&id, ProcessingStatus::Ignored, Some("ignored by you")).map_err(err)?;
+        }
         "delete" => {
             state.db.delete_reel(&id).map_err(err)?;
             let _ = std::fs::remove_dir_all(state.pipeline.data_dir.join("reels").join(&id));

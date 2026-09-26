@@ -658,3 +658,7 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .search-token button { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 @media (prefers-reduced-motion: reduce) { .close-btn:active { transform: none; } }
 @media (prefers-contrast: more) { .close-btn { border: 1px solid var(--border); } }
+
+/* Viewer: step through the list it was opened from */
+.panel-stepper { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 8px; font-variant-numeric: tabular-nums; }
+.panel-stepper .btn { font-size: 18px; line-height: 1; padding: 2px 10px; }

@@ -34,6 +34,8 @@ export function SourcesView() {
   const action = useAction();
   const { data: items = [], error } = useLoad(() => LibraryService.items(view, search), [view, search]);
   const shown = items.filter((i) => kind === "all" || i.kind === kind);
+  // The viewer steps through exactly what's shown here, in this order.
+  const list = shown.map((i) => (i.kind === "reel" ? { type: "reel" as const, id: i.reel.id } : { type: "screenshot" as const, id: i.screenshot.id }));
 
   return (
     <div className="page">
@@ -88,7 +90,7 @@ export function SourcesView() {
               const r = item.reel;
               const p = PROCESSING[r.status];
               return (
-                <div key={`r-${r.id}`} className="tile portrait" onClick={() => nav.openReel(r.id)}>
+                <div key={`r-${r.id}`} className="tile portrait" onClick={() => nav.openReel(r.id, undefined, list)}>
                   <span className="kind-badge">🎬 {r.durationSec ? formatTime(r.durationSec) : "Reel"}</span>
                   <Thumb path={r.thumbnailPath} fallback="🎬" />
                   <div className="tile-body">
@@ -106,7 +108,7 @@ export function SourcesView() {
             const s = item.screenshot;
             const p = PROCESSING[s.status];
             return (
-              <div key={`s-${s.id}`} className="tile portrait" onClick={() => nav.openScreenshot(s.id)}>
+              <div key={`s-${s.id}`} className="tile portrait" onClick={() => nav.openScreenshot(s.id, undefined, list)}>
                 <span className="kind-badge">📸</span>
                 <Thumb path={s.thumbnailPath} />
                 <div className="tile-body">

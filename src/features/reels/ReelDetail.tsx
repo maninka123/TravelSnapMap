@@ -50,7 +50,9 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
           <button className="btn" onClick={() => openUrl(r.url)}>Open on Instagram ↗</button>
           <button className="btn" disabled={busy} onClick={() => action.run(() => ReelService.action(id, "reprocess"))}>↻ Reprocess</button>
           <button className="btn" onClick={() => setPicker(true)}>🎞️ Import video from Photos</button>
-          <button className="btn danger" onClick={async () => { if (await action.run(() => ReelService.action(id, "delete")) !== undefined) nav.back(); }}>Delete</button>
+          <button className="btn" title="Hide it for good: never processed again, not counted as unfinished"
+                  onClick={async () => { if (await action.run(() => ReelService.action(id, "ignore")) !== undefined) nav.advanceAfterRemoval(); }}>Ignore</button>
+          <button className="btn danger" onClick={async () => { if (await action.run(() => ReelService.action(id, "delete")) !== undefined) nav.advanceAfterRemoval(); }}>Delete</button>
         </div>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />

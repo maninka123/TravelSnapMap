@@ -37,7 +37,8 @@ export function ScreenshotDetail({ id, highlight }: { id: string; highlight?: st
           {s.status !== "complete" && s.classification !== "travel" &&
             <button className="btn" onClick={() => action.run(() => ScreenshotService.action(id, "markTravel"))}>Mark as travel</button>}
           <button className="btn" onClick={() => action.run(() => ScreenshotService.action(id, "markNotTravel"))}>Not travel</button>
-          <button className="btn" onClick={() => action.run(() => ScreenshotService.action(id, "ignore"))}>Ignore</button>
+          <button className="btn" title="Hide it for good: never processed again, not counted as unfinished"
+                  onClick={async () => { if (await action.run(() => ScreenshotService.action(id, "ignore")) !== undefined) nav.advanceAfterRemoval(); }}>Ignore</button>
           <button className="btn" onClick={() => setDialog("add")}>＋ Add place</button>
           {data.places.length > 0 && <button className="btn" onClick={() => setDialog("crop")}>✂️ Crop photo</button>}
         </div>

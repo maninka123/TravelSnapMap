@@ -34,6 +34,12 @@ function Shell() {
   // Mac shortcuts: ⌘1–6 switch sections; ⌘F jumps to the search field of the current page.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // ← / → step through screenshots and Reels in the viewer (not while typing).
+      const typing = (e.target as HTMLElement)?.closest?.("input, textarea, select, [contenteditable]");
+      if (!typing && !e.metaKey && !e.altKey && !e.ctrlKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        if (nav.step(e.key === "ArrowRight" ? 1 : -1)) e.preventDefault();
+        return;
+      }
       if (!e.metaKey || e.altKey || e.ctrlKey) return;
       const n = Number(e.key);
       if (n >= 1 && n <= NAV.length) { e.preventDefault(); nav.go(NAV[n - 1].view); return; }
@@ -100,6 +106,16 @@ function Shell() {
             <section className="panel" onMouseDown={(e) => e.stopPropagation()}>
               <div className="panel-nav">
                 <button className="btn ghost" onClick={() => dismiss(false)}>← Back</button>
+                {top.type !== "place" && top.list && top.list.length > 1 && (() => {
+                  const i = top.list.findIndex((r) => r.id === top.id && r.type === top.type);
+                  return (
+                    <span className="panel-stepper">
+                      <button className="btn ghost small" disabled={i <= 0} onClick={() => nav.step(-1)} title="Previous (←)">‹</button>
+                      <span className="muted small">{i + 1} of {top.list.length}</span>
+                      <button className="btn ghost small" disabled={i >= top.list.length - 1} onClick={() => nav.step(1)} title="Next (→)">›</button>
+                    </span>
+                  );
+                })()}
                 <button className="close-btn" onClick={() => dismiss(true)} aria-label="Close">✕</button>
               </div>
               <ErrorBoundary key={top.id} label="This page">
