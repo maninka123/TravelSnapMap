@@ -56,8 +56,15 @@ export function MapView() {
   // A country or city picked from the search: everything (pins, suggestions, filters, list) is limited to it.
   const [scope, setScope] = useState<Scope>();
   // How the map groups places, following Country → City/Region → Place.
-  const mode: MapMode = !scope ? "world" : scope.kind === "city" ? "city" : scope.compact ? "compact" : "country";
-  const modeRef = useRef<MapMode>("world");
+  // The view switch: Smart (Country → City → Place) or a fixed level. Remembered on this Mac.
+  const [view, setView] = useState<MapViewKind>(() => {
+    try { const v = localStorage.getItem("map.view") as MapViewKind | null; return v && VIEWS.some((x) => x.key === v) ? v : "smart"; } catch { return "smart"; }
+  });
+  useEffect(() => { try { localStorage.setItem("map.view", view); } catch { /* convenience only */ } }, [view]);
+  const plan = planFor(view, scope);
+  const planRef = useRef<Plan>(plan);
+  const viewRef = useRef<MapViewKind>(view);
+  viewRef.current = view;
   const scoped = useMemo(() => places.filter((p) => !scope || (scope.kind === "country" ? p.countryCode === scope.key : areaKey(p) === scope.key)), [places, scope]);
 
   // Drop filter choices that don't exist in the new country/city, so a hidden filter never empties the map.
@@ -129,12 +136,12 @@ export function MapView() {
       const dark = resolveMapStyle(getMapStyleId()).dark;
       quietBasemap(map);
       map.addSource("places", {
-        type: "geojson", data: toGeoJSON(pinsFor(modeRef.current, placesRef.current)), ...CLUSTERING[modeRef.current],
+        type: "geojson", data: toGeoJSON(placesRef.current), ...planRef.current.clustering,
         // Per-group counts inside each cluster, for the hover summary ("18 Sights · 5 Food & drink").
         clusterProperties: Object.fromEntries(Object.keys(GROUPS).map((g) => [g, ["+", ["case", ["==", ["get", "category"], g], 1, 0]]])),
       });
-      const aggs = countryAggregates(scopeRef.current ? [] : placesRef.current);
-      const areaData = modeRef.current === "country" ? areaAggregates(placesRef.current).areas : [];
+      const aggs = planRef.current.countries ? countryAggregates(placesRef.current) : [];
+      const areaData = planRef.current.areas ? areaAggregates(placesRef.current).areas : [];
       ensureAreaImages(map, areaData);
       map.addSource("areas", {
         type: "geojson", data: areaGeoJSON(areaData), cluster: true, clusterRadius: 70, clusterMaxZoom: AREA_MAX_ZOOM - 1,
@@ -182,27 +189,28 @@ export function MapView() {
       // Inside a picked country: one bubble per city/region. Neighbouring cities merge into a round total bubble.
       const areaSize = ["step", ["get", "total"], 16, 5, 20, 15, 25, 30, 30] as unknown as number;
       map.addLayer({
-        id: "area-cluster-ring", type: "circle", source: "areas", filter: ["has", "point_count"], maxzoom: AREA_MAX_ZOOM,
+        id: "area-cluster-ring", type: "circle", source: "areas", filter: ["has", "point_count"], 
         paint: { "circle-color": CLUSTER, "circle-opacity": 0.2, "circle-radius": ["+", areaSize, 7] as unknown as number },
       });
       map.addLayer({
-        id: "area-clusters", type: "circle", source: "areas", filter: ["has", "point_count"], maxzoom: AREA_MAX_ZOOM,
+        id: "area-clusters", type: "circle", source: "areas", filter: ["has", "point_count"],
         paint: { "circle-color": CLUSTER, "circle-radius": areaSize, "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
       });
       map.addLayer({
-        id: "area-cluster-count", type: "symbol", source: "areas", filter: ["has", "point_count"], maxzoom: AREA_MAX_ZOOM,
+        id: "area-cluster-count", type: "symbol", source: "areas", filter: ["has", "point_count"],
         layout: { "text-field": ["to-string", ["get", "total"]], "text-size": 13, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true },
         paint: { "text-color": "#ffffff" },
       });
       map.addLayer({
-        id: "area-bubbles", type: "symbol", source: "areas", filter: ["!", ["has", "point_count"]], maxzoom: AREA_MAX_ZOOM,
+        id: "area-bubbles", type: "symbol", source: "areas", filter: ["!", ["has", "point_count"]],
         layout: { "icon-image": ["get", "image"], "icon-allow-overlap": true, "icon-ignore-placement": true, "symbol-sort-key": ["-", 0, ["get", "count"]] },
       });
-      // World view: one flag bubble per country (only when nothing is picked).
+      // One flag bubble per country.
       map.addLayer({
-        id: "country-bubbles", type: "symbol", source: "countries", maxzoom: COUNTRY_MAX_ZOOM,
+        id: "country-bubbles", type: "symbol", source: "countries",
         layout: { "icon-image": ["get", "image"], "icon-allow-overlap": true, "icon-ignore-placement": true, "symbol-sort-key": ["-", 0, ["get", "count"]] },
       });
+      applyPlan(map, planRef.current);
     });
 
     map.on("load", () => {
@@ -262,12 +270,18 @@ export function MapView() {
         const p = e.features?.[0]?.properties;
         hover.remove();
         const parent = scopeRef.current;
-        if (p) enterScopeRef.current({ kind: "city", key: p.key, label: p.key, code: parent?.code ?? null, parent: parent?.kind === "country" ? parent : undefined });
+        if (!p) return;
+        const first = placesRef.current.find((x) => areaKey(x) === p.key);
+        const countryScope: Scope | undefined = parent?.kind === "country" ? parent
+          : first?.countryCode ? { kind: "country", key: first.countryCode, label: first.country ?? first.countryCode, code: first.countryCode } : undefined;
+        enterScopeRef.current({ kind: "city", key: p.key, label: p.key, code: first?.countryCode ?? parent?.code ?? null, parent: countryScope });
       });
       map.on("click", "country-bubbles", (e) => {
         const p = e.features?.[0]?.properties;
         hover.remove();
-        if (p) enterScopeRef.current({ kind: "country", key: p.cc, label: p.name, code: p.cc });
+        if (!p) return;
+        if (viewRef.current === "countries") setView("smart"); // next step: that country's cities
+        enterScopeRef.current({ kind: "country", key: p.cc, label: p.name, code: p.cc });
       });
       for (const layer of ["clusters", "place-points", "country-bubbles", "area-bubbles", "area-clusters"]) {
         map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
@@ -283,41 +297,25 @@ export function MapView() {
   enterScopeRef.current = enterScope;
   scopeRef.current = scope;
 
-  // Push data into the map for the current level: pins, city/region bubbles, country bubbles.
+  // Push data into the map and show the layers the current view needs (and only those).
+  const planKey = JSON.stringify(plan);
   useEffect(() => {
     placesRef.current = filtered;
-    modeRef.current = mode;
+    planRef.current = plan;
     const map = mapRef.current;
-    const pins = map?.getSource("places") as GeoJSONSource | undefined;
-    pins?.setClusterOptions(CLUSTERING[mode]);
-    pins?.setData(toGeoJSON(pinsFor(mode, filtered)));
-    const areas = map?.getSource("areas") as GeoJSONSource | undefined;
-    if (map && areas) {
-      const areaData = mode === "country" ? areaAggregates(filtered).areas : [];
-      ensureAreaImages(map, areaData);
-      areas.setData(areaGeoJSON(areaData));
-    }
-    const countries = map?.getSource("countries") as GeoJSONSource | undefined;
-    if (map && countries) {
-      const aggs = countryAggregates(scope ? [] : filtered);
-      countries.setData(countryGeoJSON(aggs));
-      void ensureCountryImages(map, aggs, () => countries.setData(countryGeoJSON(aggs)));
-    }
-  }, [filtered, scope, mode]);
-
-  // World view: pins/clusters appear once you zoom past the country bubbles. Inside a pick, at any zoom.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      for (const id of ["cluster-ring", "clusters", "cluster-count", "place-points", "place-selected"]) {
-        if (map.getLayer(id)) map.setLayerZoomRange(id, mode === "world" ? COUNTRY_MAX_ZOOM : mode === "country" ? AREA_MAX_ZOOM : 0, 24);
-      }
-    };
-    apply();
-    map.on("style.load", apply);
-    return () => { map.off("style.load", apply); };
-  }, [mode]);
+    if (!map?.getSource("places")) return;
+    const pins = map.getSource("places") as GeoJSONSource;
+    pins.setClusterOptions(plan.clustering);
+    pins.setData(toGeoJSON(filtered));
+    const areaData = plan.areas ? areaAggregates(filtered).areas : [];
+    ensureAreaImages(map, areaData);
+    (map.getSource("areas") as GeoJSONSource).setData(areaGeoJSON(areaData));
+    const countries = map.getSource("countries") as GeoJSONSource;
+    const aggs = plan.countries ? countryAggregates(filtered) : [];
+    countries.setData(countryGeoJSON(aggs));
+    void ensureCountryImages(map, aggs, () => countries.setData(countryGeoJSON(aggs)));
+    applyPlan(map, plan);
+  }, [filtered, planKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switch base map; the choice is remembered for next time.
   useEffect(() => {
@@ -414,6 +412,18 @@ export function MapView() {
       </div>
 
       <div className="map-style-wrap">
+        <div className="map-view-switch" role="tablist" aria-label="Map view">
+          {VIEWS.map((v) => (
+            <button key={v.key} role="tab" aria-selected={view === v.key} className={view === v.key ? "active" : ""} title={v.hint}
+                    onClick={() => {
+                      setView(v.key);
+                      if (v.key === "countries") { if (scope) enterScope(undefined); }        // back out to the world
+                      else if (scope?.kind === "city" && v.key !== "smart") enterScope(scope.parent); // a city already shows its pins
+                    }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
         <button className={`map-style-btn ${styleMenu ? "is-on" : ""}`} onClick={() => setStyleMenu((o) => !o)} aria-haspopup="menu" aria-expanded={styleMenu} title="Map style">
           <LayersIcon /> {MAP_STYLES.find((s) => s.id === styleId)?.label}
         </button>
@@ -646,15 +656,54 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
 
 type Scope = { kind: "country" | "city"; key: string; label: string; code: string | null; parent?: Scope; compact?: boolean };
 
-/** world: country bubbles, then clusters · country: city/region bubbles (pins only when zoomed right in) · compact/city: every pin */
-type MapMode = "world" | "country" | "compact" | "city";
+type MapViewKind = "smart" | "countries" | "cities" | "places";
 
-const CLUSTERING: Record<MapMode, { cluster: boolean; clusterRadius: number; clusterMaxZoom: number }> = {
-  world: { cluster: true, clusterRadius: 44, clusterMaxZoom: 10 },
-  country: { cluster: false, clusterRadius: 44, clusterMaxZoom: 10 },
-  compact: { cluster: false, clusterRadius: 44, clusterMaxZoom: 10 },
-  city: { cluster: false, clusterRadius: 28, clusterMaxZoom: 13 },
+const VIEWS: { key: MapViewKind; label: string; hint: string }[] = [
+  { key: "smart", label: "Smart", hint: "Country → city → place as you go" },
+  { key: "countries", label: "Countries", hint: "One bubble per country" },
+  { key: "cities", label: "Cities", hint: "One bubble per city (nearby cities merge)" },
+  { key: "places", label: "Places", hint: "Every place as a pin" },
+];
+
+type Range = [number, number] | null;
+type Clustering = { cluster: boolean; clusterRadius: number; clusterMaxZoom: number };
+/** Which markers show at which zooms. Each zoom shows one kind of marker, never a mix. */
+interface Plan { countries: Range; areas: Range; pins: Range; clustering: Clustering }
+
+const CLUSTERED: Clustering = { cluster: true, clusterRadius: 44, clusterMaxZoom: 10 };
+const FLAT: Clustering = { cluster: false, clusterRadius: 44, clusterMaxZoom: 10 };
+
+function planFor(view: MapViewKind, scope: Scope | undefined): Plan {
+  // A picked city: every pin in it, no bubbles, no clusters — whatever the view.
+  if (scope?.kind === "city") return { countries: null, areas: null, pins: [0, 24], clustering: FLAT };
+  switch (view) {
+    case "countries": return { countries: [0, 24], areas: null, pins: null, clustering: CLUSTERED };
+    case "cities": return { countries: null, areas: [0, 24], pins: null, clustering: CLUSTERED };
+    case "places": return { countries: null, areas: null, pins: [0, 24], clustering: scope?.compact ? FLAT : CLUSTERED };
+    default:
+      if (!scope) return { countries: [0, COUNTRY_MAX_ZOOM], areas: null, pins: [COUNTRY_MAX_ZOOM, 24], clustering: CLUSTERED };
+      if (scope.compact) return { countries: null, areas: null, pins: [0, 24], clustering: FLAT };
+      return { countries: null, areas: [0, AREA_MAX_ZOOM], pins: [AREA_MAX_ZOOM, 24], clustering: FLAT };
+  }
+}
+
+const LAYER_GROUPS: Record<"countries" | "areas" | "pins", string[]> = {
+  countries: ["country-bubbles"],
+  areas: ["area-cluster-ring", "area-clusters", "area-cluster-count", "area-bubbles"],
+  pins: ["cluster-ring", "clusters", "cluster-count", "place-points", "place-selected", "place-labels"],
 };
+
+/** Shows/hides each group of layers and sets the zooms it's visible at. */
+function applyPlan(map: MLMap, plan: Plan) {
+  (Object.keys(LAYER_GROUPS) as (keyof typeof LAYER_GROUPS)[]).forEach((group) => {
+    const range = plan[group];
+    for (const id of LAYER_GROUPS[group]) {
+      if (!map.getLayer(id)) continue;
+      map.setLayoutProperty(id, "visibility", range ? "visible" : "none");
+      if (range) map.setLayerZoomRange(id, id === "place-labels" ? Math.max(range[0], 11) : range[0], range[1]);
+    }
+  });
+}
 
 type Suggestion =
   | { kind: "place"; key: string; label: string; sub: string; place: Place }
@@ -728,11 +777,6 @@ function Highlight({ text, query }: { text: string; query: string }) {
   const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
   if (i < 0) return <>{text}</>;
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
-}
-
-/** Pins for the current level (inside a country they only show once zoomed past the city bubbles). */
-function pinsFor(_mode: MapMode, places: Place[]): Place[] {
-  return places;
 }
 
 function countsFor(places: Place[]): Record<string, number> {
