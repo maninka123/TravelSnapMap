@@ -1,7 +1,8 @@
 # TravelSnapMap
 
-A macOS app that turns your travel screenshots and saved Instagram Reels into a personal map of places you want to go —
-with the tips, prices and opening hours you saved, each linked back to the screenshot or Reel it came from.
+TravelSnapMap is a local-first macOS app that turns scattered travel screenshots and Instagram Reels into an organised personal map of places, tips, photos and travel memories.
+
+It scans screenshots from Apple Photos, understands travel information using Apple Vision and AI, resolves real places with Apple Maps, and combines multiple screenshots and Reels about the same place. Every extracted detail stays linked to its original source.
 
 ![TravelSnapMap — saved places on the map](docs/screenshot.png)
 
@@ -31,8 +32,6 @@ macOS 15+, local-first.
 | Signed & notarized download (Developer ID) | Open on any Mac without security warnings |
 | First-run DeepSeek key setup | Other people don't have a `.env.local` |
 | Tidy place kinds automatically | Some places named after a city are saved as "station" or "activity" |
-| Optional: neighbouring countries in city view | Show places just across a border when zooming out |
-| iPhone companion | Screenshots are mostly taken on the phone |
 
 ## Privacy and cost
 
