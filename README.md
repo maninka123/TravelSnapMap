@@ -14,8 +14,8 @@ macOS 15+, local-first.
   Vision, and finds the places, tips, prices and hours in them. Clearly unrelated screenshots never leave your Mac.
 - **Instagram Reels.** Paste one link, a list, or a text file of links. The audio is transcribed on-device, key frames are
   read, and the places mentioned are added with the exact moment they're mentioned.
-- **Map.** Your saved places on a quiet map with category pins and clusters, type-ahead search, filters, a list of the
-  places in view (by country, then by city), and a choice of map styles.
+- **Map.** A personal world map: flag bubbles per country when zoomed out, clusters showing what's inside, then
+  category pins — plus type-ahead search, filters, a list of the places in view, and a choice of map styles.
 - **Place pages.** Every fact shows its source. Different advice from different sources is kept side by side, and
   **Before you go** warns about out-of-date or conflicting info.
 - **Trips and memories.** Group places into trips and days. After you've been, add the date, your notes and your own

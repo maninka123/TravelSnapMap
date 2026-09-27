@@ -717,3 +717,14 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .source-tile .source-x:hover { background: var(--bad); color: #fff; }
 .source-tile .tile-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .source-tile .tile-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Map: hover summaries and the chooser for pins on the same spot */
+.map-hover .maplibregl-popup-content { line-height: 1.45; }
+.map-chooser .maplibregl-popup-content { padding: 6px; border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-l); }
+.map-chooser .maplibregl-popup-tip { display: none; }
+.pin-chooser { display: flex; flex-direction: column; min-width: 190px; }
+.pin-chooser-title { padding: 4px 8px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.pin-chooser-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.pin-chooser-row:hover { background: var(--fill); }
+.pin-chooser-row:active { background: var(--fill-strong); }
+.pin-chooser-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px rgba(0,0,0,0.15); }
