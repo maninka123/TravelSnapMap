@@ -66,7 +66,14 @@ function Shell() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">📍</span>
+          <span className="brand-mark" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 26 26">
+              <defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#2f9e8f" /><stop offset="1" stopColor="#0b6fd6" /></linearGradient></defs>
+              <rect width="26" height="26" rx="7" fill="url(#bm)" />
+              <path d="M13 5.5a5.2 5.2 0 0 0-5.2 5.2c0 3.9 5.2 9.8 5.2 9.8s5.2-5.9 5.2-9.8A5.2 5.2 0 0 0 13 5.5Z" fill="#fff" />
+              <circle cx="13" cy="10.7" r="2" fill="#0f7fb0" />
+            </svg>
+          </span>
           <span>TravelSnapMap</span>
         </div>
         <nav>
