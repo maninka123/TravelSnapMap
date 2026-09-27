@@ -115,3 +115,4 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Kind-of-place menu with icons (grouped like the map); red Remove pin with a clear confirmation; after removal the next place opens
 - [x] Source cards: tag only when Needs review; small red ✕ on a place's sources moves one to Not travel
 - [x] Map zoom levels: country flag bubbles (0–3) → clusters with per-kind hover summary (4–10) → individual pins (10+); picked city/small country shows every place; chooser for pins on the same spot
+- [x] Map hierarchy Country → City/Region → Place: country bubble → fit country → city/region bubbles (single places as pins) → city: small clusters → pins; small countries straight to pins; hover cards with kinds
