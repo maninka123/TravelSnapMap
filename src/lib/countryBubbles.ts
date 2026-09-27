@@ -139,14 +139,13 @@ export const areaKey = (p: Place) => p.city ?? p.region ?? p.canonicalName;
 
 export interface AreaAggregate { key: string; count: number; lng: number; lat: number; summary: string; image: string; places: Place[] }
 
-/** One bubble per city/region with 2+ places; single-place areas are returned separately (shown as pins). */
+/** One bubble per city/region (including cities with a single place), so a country shows one kind of marker. */
 export function areaAggregates(places: Place[]): { areas: AreaAggregate[]; singles: Place[] } {
   const by = new Map<string, Place[]>();
   places.forEach((p) => by.set(areaKey(p), [...(by.get(areaKey(p)) ?? []), p]));
   const areas: AreaAggregate[] = [];
   const singles: Place[] = [];
   for (const [key, ps] of by) {
-    if (ps.length === 1) { singles.push(ps[0]); continue; }
     const counts: Partial<Record<CategoryGroup, number>> = {};
     ps.forEach((p) => { const g = groupOf(p.category); counts[g] = (counts[g] ?? 0) + 1; });
     areas.push({

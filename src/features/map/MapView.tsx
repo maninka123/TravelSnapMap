@@ -136,7 +136,10 @@ export function MapView() {
       const aggs = countryAggregates(scopeRef.current ? [] : placesRef.current);
       const areaData = modeRef.current === "country" ? areaAggregates(placesRef.current).areas : [];
       ensureAreaImages(map, areaData);
-      map.addSource("areas", { type: "geojson", data: areaGeoJSON(areaData) });
+      map.addSource("areas", {
+        type: "geojson", data: areaGeoJSON(areaData), cluster: true, clusterRadius: 70, clusterMaxZoom: AREA_MAX_ZOOM - 1,
+        clusterProperties: { total: ["+", ["get", "count"]] },
+      });
       map.addSource("countries", { type: "geojson", data: countryGeoJSON(aggs) });
       void ensureCountryImages(map, aggs, () => (map.getSource("countries") as GeoJSONSource | undefined)?.setData(countryGeoJSON(countryAggregates(scopeRef.current ? [] : placesRef.current))));
       // Category pins (images are dropped whenever the style changes, so add them each time).
@@ -176,9 +179,23 @@ export function MapView() {
       });
       const sel = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selectedRef.current]] as maplibregl.FilterSpecification;
       map.setFilter("place-selected", sel);
-      // Inside a picked country: one bubble per city/region with 2+ places.
+      // Inside a picked country: one bubble per city/region. Neighbouring cities merge into a round total bubble.
+      const areaSize = ["step", ["get", "total"], 16, 5, 20, 15, 25, 30, 30] as unknown as number;
       map.addLayer({
-        id: "area-bubbles", type: "symbol", source: "areas",
+        id: "area-cluster-ring", type: "circle", source: "areas", filter: ["has", "point_count"], maxzoom: AREA_MAX_ZOOM,
+        paint: { "circle-color": CLUSTER, "circle-opacity": 0.2, "circle-radius": ["+", areaSize, 7] as unknown as number },
+      });
+      map.addLayer({
+        id: "area-clusters", type: "circle", source: "areas", filter: ["has", "point_count"], maxzoom: AREA_MAX_ZOOM,
+        paint: { "circle-color": CLUSTER, "circle-radius": areaSize, "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
+      });
+      map.addLayer({
+        id: "area-cluster-count", type: "symbol", source: "areas", filter: ["has", "point_count"], maxzoom: AREA_MAX_ZOOM,
+        layout: { "text-field": ["to-string", ["get", "total"]], "text-size": 13, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff" },
+      });
+      map.addLayer({
+        id: "area-bubbles", type: "symbol", source: "areas", filter: ["!", ["has", "point_count"]], maxzoom: AREA_MAX_ZOOM,
         layout: { "icon-image": ["get", "image"], "icon-allow-overlap": true, "icon-ignore-placement": true, "symbol-sort-key": ["-", 0, ["get", "count"]] },
       });
       // World view: one flag bubble per country (only when nothing is picked).
@@ -223,6 +240,24 @@ export function MapView() {
         if (p && at) hover.setLngLat(at).setHTML(hoverCard(p.key, `${p.count} saved places · click to open`, countsFor(placesRef.current.filter((x) => areaKey(x) === p.key)))).addTo(map);
       });
       map.on("mouseleave", "area-bubbles", () => hover.remove());
+      map.on("mousemove", "area-clusters", async (e) => {
+        const f = e.features?.[0];
+        const at = (f?.geometry as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined;
+        if (!f || !at) return;
+        const leaves = await (map.getSource("areas") as GeoJSONSource).getClusterLeaves(f.properties.cluster_id, 50, 0);
+        const names = leaves.sort((a, b) => (b.properties?.count ?? 0) - (a.properties?.count ?? 0)).map((l) => String(l.properties?.key));
+        const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? ` +${names.length - 3}` : "");
+        const members = new Set(names);
+        hover.setLngLat(at).setHTML(hoverCard(shown, `${f.properties.total} saved places · click to zoom in`,
+          countsFor(placesRef.current.filter((x) => members.has(areaKey(x)))))).addTo(map);
+      });
+      map.on("mouseleave", "area-clusters", () => hover.remove());
+      map.on("click", "area-clusters", async (e) => {
+        const f = map.queryRenderedFeatures(e.point, { layers: ["area-clusters"] })[0];
+        hover.remove();
+        const zoom = await (map.getSource("areas") as GeoJSONSource).getClusterExpansionZoom(f.properties.cluster_id);
+        map.easeTo({ center: (f.geometry as GeoJSON.Point).coordinates as [number, number], zoom });
+      });
       map.on("click", "area-bubbles", (e) => {
         const p = e.features?.[0]?.properties;
         hover.remove();
@@ -234,7 +269,7 @@ export function MapView() {
         hover.remove();
         if (p) enterScopeRef.current({ kind: "country", key: p.cc, label: p.name, code: p.cc });
       });
-      for (const layer of ["clusters", "place-points", "country-bubbles", "area-bubbles"]) {
+      for (const layer of ["clusters", "place-points", "country-bubbles", "area-bubbles", "area-clusters"]) {
         map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
         map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
       }
@@ -276,7 +311,7 @@ export function MapView() {
     if (!map) return;
     const apply = () => {
       for (const id of ["cluster-ring", "clusters", "cluster-count", "place-points", "place-selected"]) {
-        if (map.getLayer(id)) map.setLayerZoomRange(id, mode === "world" ? COUNTRY_MAX_ZOOM : 0, 24);
+        if (map.getLayer(id)) map.setLayerZoomRange(id, mode === "world" ? COUNTRY_MAX_ZOOM : mode === "country" ? AREA_MAX_ZOOM : 0, 24);
       }
     };
     apply();
@@ -611,14 +646,14 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
 
 type Scope = { kind: "country" | "city"; key: string; label: string; code: string | null; parent?: Scope; compact?: boolean };
 
-/** world: country bubbles, then clusters · country: city/region bubbles · compact: every pin · city: small clusters → pins */
+/** world: country bubbles, then clusters · country: city/region bubbles (pins only when zoomed right in) · compact/city: every pin */
 type MapMode = "world" | "country" | "compact" | "city";
 
 const CLUSTERING: Record<MapMode, { cluster: boolean; clusterRadius: number; clusterMaxZoom: number }> = {
   world: { cluster: true, clusterRadius: 44, clusterMaxZoom: 10 },
   country: { cluster: false, clusterRadius: 44, clusterMaxZoom: 10 },
   compact: { cluster: false, clusterRadius: 44, clusterMaxZoom: 10 },
-  city: { cluster: true, clusterRadius: 28, clusterMaxZoom: 13 },
+  city: { cluster: false, clusterRadius: 28, clusterMaxZoom: 13 },
 };
 
 type Suggestion =
@@ -695,9 +730,9 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
-/** Pins for the current level: inside a spread-out country only places alone in their city (the rest are city bubbles). */
-function pinsFor(mode: MapMode, places: Place[]): Place[] {
-  return mode === "country" ? areaAggregates(places).singles : places;
+/** Pins for the current level (inside a country they only show once zoomed past the city bubbles). */
+function pinsFor(_mode: MapMode, places: Place[]): Place[] {
+  return places;
 }
 
 function countsFor(places: Place[]): Record<string, number> {
@@ -771,6 +806,8 @@ function toGeoJSON(places: Place[]): GeoJSON.FeatureCollection {
 
 /** World view: zoom 0–3 country bubbles · 3.5–10 clusters (see CLUSTERING) · 10+ individual places. */
 const COUNTRY_MAX_ZOOM = 3.5;
+/** Inside a picked country, city/region bubbles give way to individual pins at this zoom. */
+const AREA_MAX_ZOOM = 11;
 /** Picking a city zooms to about street/neighbourhood level. */
 const CITY_ZOOM = 11;
 
