@@ -743,7 +743,6 @@ select.status-pill:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 /* Review: answered cards and the review box inside the screenshot/Reel viewer */
 .review-thumb { padding: 0; border: 0; background: none; cursor: pointer; border-radius: var(--radius); overflow: hidden; align-self: flex-start; }
 .review-thumb:active { transform: scale(0.98); }
-.review-card.answered { opacity: 0.96; }
 .review-title-small { font-weight: 600; font-size: 13.5px; }
 .answer-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .review-card.compact { grid-template-columns: 1fr; box-shadow: none; border: 1px solid var(--border); }

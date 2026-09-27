@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { fileUrl } from "../api/services";
 import type { Place, PlaceCandidate } from "../api/types";
 import { CATEGORY, STATUS } from "../lib/labels";
@@ -40,7 +41,8 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Rendered at the top of the window (a portal) so no card or panel can trap or cover it.
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className={`modal ${wide ? "modal-wide" : ""}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
@@ -49,7 +51,8 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
         </div>
         <div className="modal-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
