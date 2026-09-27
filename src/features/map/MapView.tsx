@@ -9,8 +9,9 @@ import { CATEGORY, STATUS } from "../../lib/labels";
 import { openUrl } from "../../lib/open";
 import { QuickAddPlace } from "../places/QuickAddPlace";
 import { useAction, useLoad, useNav } from "../../lib/nav";
+import { withMetro } from "../../lib/metro";
 import { CategoryBadge, CategoryGlyph, colorOf, GROUPS, groupOf, pinImage, type CategoryGroup } from "../../lib/categoryIcons";
-import { areaAggregates, areaGeoJSON, areaKey, countryAggregates, countryGeoJSON, ensureAreaImages, ensureCountryImages } from "../../lib/countryBubbles";
+import { areaAggregates, areaGeoJSON, areaKey, PIN_CITY_MAX, rankAreas, support, countryAggregates, countryGeoJSON, ensureAreaImages, ensureCountryImages } from "../../lib/countryBubbles";
 import { getMapStyleId, MAP_STYLES, resolveMapStyle, setMapStyleId, type MapStyleId } from "../../lib/mapStyle";
 
 /** Base-map labels that compete with your places: road names/shields, POIs, water lines, villages. */
@@ -29,7 +30,8 @@ export function MapView() {
   const nav = useNav();
   // The map shows verified places only; provisional ones wait in the Review inbox.
   const { data: loaded } = useLoad(() => PlaceService.list({ verifiedOnly: true }), []);
-  const places = useMemo(() => loaded ?? [], [loaded]);
+  // Suburbs/districts are grouped under their city (Surry Hills → Sydney, Pudong → Shanghai).
+  const places = useMemo(() => withMetro(loaded ?? []), [loaded]);
   const [categories, setCategories] = useState<CategoryGroup[]>([]);
   const [statuses, setStatuses] = useState<PersonalStatus[]>([]);
   const [search, setSearch] = useState("");
@@ -43,7 +45,7 @@ export function MapView() {
   const [styleId, setStyleId] = useState<MapStyleId>(getMapStyleId);
   const [styleMenu, setStyleMenu] = useState(false);
   const selectedRef = useRef<string>("");
-  const enterScopeRef = useRef<(s: Scope | undefined) => void>(() => {});
+  const enterScopeRef = useRef<(s: Scope | undefined, move?: boolean) => void>(() => {});
   const scopeRef = useRef<Scope | undefined>(undefined);
   const appliedStyle = useRef(resolveMapStyle(getMapStyleId()).url);
 
@@ -55,17 +57,11 @@ export function MapView() {
 
   // A country or city picked from the search: everything (pins, suggestions, filters, list) is limited to it.
   const [scope, setScope] = useState<Scope>();
-  // How the map groups places, following Country → City/Region → Place.
-  // The view switch: Smart (Country → City → Place) or a fixed level. Remembered on this Mac.
-  const [view, setView] = useState<MapViewKind>(() => {
-    try { const v = localStorage.getItem("map.view") as MapViewKind | null; return v && VIEWS.some((x) => x.key === v) ? v : "smart"; } catch { return "smart"; }
-  });
-  useEffect(() => { try { localStorage.setItem("map.view", view); } catch { /* convenience only */ } }, [view]);
-  const plan = planFor(view, scope);
-  const planRef = useRef<Plan>(plan);
-  const viewRef = useRef<MapViewKind>(view);
-  viewRef.current = view;
   const scoped = useMemo(() => places.filter((p) => !scope || (scope.kind === "country" ? p.countryCode === scope.key : areaKey(p) === scope.key)), [places, scope]);
+  // Countries → (click) that country's cities → (click) that city's places. Small countries skip the city step.
+  const plan = planFor(scope, scoped);
+  const planRef = useRef<Plan>(plan);
+  const clusterKeyRef = useRef(JSON.stringify(plan.clustering));
 
   // Drop filter choices that don't exist in the new country/city, so a hidden filter never empties the map.
   useEffect(() => {
@@ -79,20 +75,27 @@ export function MapView() {
     setSelected((s) => (s ? places.find((p) => p.id === s.id) : s));
   }, [places]);
 
-  const filtered = useMemo(() => {
+  const matches = (p: Place) => {
     const q = search.toLowerCase().trim();
-    return scoped.filter((p) =>
-      (categories.length === 0 || categories.includes(groupOf(p.category))) &&
+    return (categories.length === 0 || categories.includes(groupOf(p.category))) &&
       (statuses.length === 0 || statuses.includes(p.personalStatus)) &&
-      (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q)));
-  }, [scoped, categories, statuses, search]);
+      (!q || [p.canonicalName, ...p.alternativeNames, p.city, p.country].join(" ").toLowerCase().includes(q));
+  };
+  const filtered = useMemo(() => scoped.filter(matches), [scoped, categories, statuses, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  // In a city the map also shows the other pins in that country (your filters still apply), so zooming out
+  // reveals the places around it — but never places in other countries.
+  const cityCode = scope?.kind === "city" ? scope.code ?? scoped[0]?.countryCode ?? null : null;
+  const mapPins = useMemo(
+    () => (cityCode ? places.filter((p) => p.countryCode === cityCode && matches(p)) : filtered),
+    [cityCode, places, filtered, categories, statuses, search], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // Saved places inside the visible map area (not an internet search — only your own places).
   const inView = useMemo(() => (bounds ? filtered.filter((p) => bounds.contains([p.longitude, p.latitude])) : filtered), [filtered, bounds]);
 
   const suggestions = useMemo(() => suggest(scoped, search, scope), [scoped, search, scope]);
 
-  const enterScope = (next: Scope | undefined) => {
+  const enterScope = (next: Scope | undefined, move = true) => {
     setScope(next);
     if (next?.kind === "country") next.compact = isCompact(mapRef.current, places.filter((p) => p.countryCode === next.key));
     setSearch("");
@@ -101,7 +104,8 @@ export function MapView() {
     const inScope = places.filter((p) => !next || (next.kind === "country" ? p.countryCode === next.key : areaKey(p) === next.key));
     // A city: zoom in past the clustering level so every place shows with its own icon.
     // A country whose places sit close together (e.g. Sri Lanka): zoom just past clustering so all show.
-    if (map) fit(map, inScope, next?.kind === "city" ? CITY_ZOOM : next?.kind === "country" ? "compact" : undefined);
+    if (!map || !move) return;
+    fit(map, inScope, next?.kind === "city" ? CITY_ZOOM : next?.kind === "country" ? "compact" : undefined);
   };
 
   const pick = (s: Suggestion) => {
@@ -136,7 +140,7 @@ export function MapView() {
       const dark = resolveMapStyle(getMapStyleId()).dark;
       quietBasemap(map);
       map.addSource("places", {
-        type: "geojson", data: toGeoJSON(placesRef.current), ...planRef.current.clustering,
+        type: "geojson", data: toGeoJSON(placesRef.current, scopeRef.current?.kind === "city" ? scopeRef.current.key : null), ...planRef.current.clustering,
         // Per-group counts inside each cluster, for the hover summary ("18 Sights · 5 Food & drink").
         clusterProperties: Object.fromEntries(Object.keys(GROUPS).map((g) => [g, ["+", ["case", ["==", ["get", "category"], g], 1, 0]]])),
       });
@@ -144,7 +148,7 @@ export function MapView() {
       const areaData = planRef.current.areas ? areaAggregates(placesRef.current).areas : [];
       ensureAreaImages(map, areaData);
       map.addSource("areas", {
-        type: "geojson", data: areaGeoJSON(areaData), cluster: true, clusterRadius: 70, clusterMaxZoom: AREA_MAX_ZOOM - 1,
+        type: "geojson", data: areaGeoJSON(areaData), cluster: false, clusterRadius: 70, clusterMaxZoom: AREA_MAX_ZOOM - 1,
         clusterProperties: { total: ["+", ["get", "count"]] },
       });
       map.addSource("countries", { type: "geojson", data: countryGeoJSON(aggs) });
@@ -172,16 +176,25 @@ export function MapView() {
       // Single places: a category icon badge. The selected one is larger.
       map.addLayer({
         id: "place-points", type: "symbol", source: "places", filter: ["!", ["has", "point_count"]],
-        layout: { "icon-image": ["concat", "pin-", ["get", "category"]], "icon-allow-overlap": true, "icon-ignore-placement": true },
-        paint: { "icon-opacity": ["case", ["==", ["get", "status"], "notInterested"], 0.4, 1] },
+        layout: {
+          "icon-image": ["concat", "pin-", ["get", "category"]], "icon-allow-overlap": true, "icon-ignore-placement": true,
+          // The city itself biggest and on top; the city's places full size; neighbours around it smaller.
+          "icon-size": ["case", ["get", "cityPlace"], 1.4, ["get", "focus"], 1, 0.7],
+          "symbol-sort-key": ["case", ["get", "cityPlace"], 2, ["get", "focus"], 1, 0],
+        },
+        paint: { "icon-opacity": ["case", ["==", ["get", "status"], "notInterested"], 0.4, ["get", "focus"], 1, 0.55] },
       });
       map.addLayer({
         id: "place-selected", type: "symbol", source: "places", filter: ["==", ["get", "id"], ""],
         layout: { "icon-image": ["concat", "pin-sel-", ["get", "category"]], "icon-allow-overlap": true, "icon-ignore-placement": true },
       });
       map.addLayer({
-        id: "place-labels", type: "symbol", source: "places", filter: ["!", ["has", "point_count"]], minzoom: 11,
-        layout: { "text-field": ["get", "name"], "text-size": 12, "text-offset": [0, 1.3], "text-anchor": "top", "text-font": ["Noto Sans Bold"], "text-max-width": 10 },
+        id: "place-labels", type: "symbol", source: "places", filter: ["all", ["!", ["has", "point_count"]], ["get", "focus"]], minzoom: 11,
+        layout: {
+          "text-field": ["get", "name"], "text-size": ["case", ["get", "cityPlace"], 14, 12], "text-offset": ["case", ["get", "cityPlace"], ["literal", [0, 1.7]], ["literal", [0, 1.3]]],
+          "text-anchor": "top", "text-font": ["Noto Sans Bold"], "text-max-width": 10,
+          "symbol-sort-key": ["case", ["get", "cityPlace"], 0, 1],
+        },
         paint: { "text-color": dark ? "#f2f2f7" : "#1c1c1e", "text-halo-color": dark ? "#1c1c1e" : "#ffffff", "text-halo-width": 1.6 },
       });
       const sel = ["all", ["!", ["has", "point_count"]], ["==", ["get", "id"], selectedRef.current]] as maplibregl.FilterSpecification;
@@ -201,8 +214,13 @@ export function MapView() {
         layout: { "text-field": ["to-string", ["get", "total"]], "text-size": 13, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true },
         paint: { "text-color": "#ffffff" },
       });
+      // Smaller cities (3+ places, outside the top 8): a small dot — hover for the name, click to open.
       map.addLayer({
-        id: "area-bubbles", type: "symbol", source: "areas", filter: ["!", ["has", "point_count"]],
+        id: "area-minor", type: "circle", source: "areas", filter: ["all", ["!", ["has", "point_count"]], ["!", ["get", "major"]]],
+        paint: { "circle-color": CLUSTER, "circle-radius": 6, "circle-opacity": 0.8, "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" },
+      });
+      map.addLayer({
+        id: "area-bubbles", type: "symbol", source: "areas", filter: ["all", ["!", ["has", "point_count"]], ["get", "major"]],
         layout: { "icon-image": ["get", "image"], "icon-allow-overlap": true, "icon-ignore-placement": true, "symbol-sort-key": ["-", 0, ["get", "count"]] },
       });
       // One flag bubble per country.
@@ -224,7 +242,11 @@ export function MapView() {
       map.on("click", "place-points", (e) => {
         // Several pins on (almost) the same spot: offer a short list instead of guessing which one.
         const box: [maplibregl.PointLike, maplibregl.PointLike] = [[e.point.x - 14, e.point.y - 14], [e.point.x + 14, e.point.y + 14]];
-        const ids = [...new Set(map.queryRenderedFeatures(box, { layers: ["place-points"] }).map((f) => f.properties?.id as string))];
+        const hit = map.queryRenderedFeatures(e.point, { layers: ["place-points"] });
+        const city = hit.find((f) => f.properties?.cityPlace);
+        if (city) { setSelected(placesRef.current.find((p) => p.id === city.properties?.id)); return; } // the city pin always comes first
+        const near = map.queryRenderedFeatures(box, { layers: ["place-points"] }).filter((f) => !f.properties?.cityPlace);
+        const ids = [...new Set(near.map((f) => f.properties?.id as string))];
         const here = ids.map((id) => placesRef.current.find((p) => p.id === id)).filter((p): p is Place => !!p);
         if (here.length > 1) showChooser(map, e.lngLat, here, (p) => setSelected(p));
         else setSelected(here[0]);
@@ -248,6 +270,20 @@ export function MapView() {
         if (p && at) hover.setLngLat(at).setHTML(hoverCard(p.key, `${p.count} saved places · click to open`, countsFor(placesRef.current.filter((x) => areaKey(x) === p.key)))).addTo(map);
       });
       map.on("mouseleave", "area-bubbles", () => hover.remove());
+      map.on("mousemove", "area-minor", (e) => {
+        const p = e.features?.[0]?.properties;
+        const at = (e.features?.[0]?.geometry as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined;
+        if (p && at) hover.setLngLat(at).setHTML(hoverCard(p.key, `${p.count} saved places · click to open`, countsFor(placesRef.current.filter((x) => areaKey(x) === p.key)))).addTo(map);
+      });
+      map.on("mouseleave", "area-minor", () => hover.remove());
+      map.on("click", "area-minor", (e) => {
+        const p = e.features?.[0]?.properties;
+        hover.remove();
+        if (!p) return;
+        const parent = scopeRef.current;
+        const first = placesRef.current.find((x) => areaKey(x) === p.key);
+        enterScopeRef.current({ kind: "city", key: p.key, label: p.key, code: first?.countryCode ?? null, parent: parent?.kind === "country" ? parent : undefined });
+      });
       map.on("mousemove", "area-clusters", async (e) => {
         const f = e.features?.[0];
         const at = (f?.geometry as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined;
@@ -280,10 +316,9 @@ export function MapView() {
         const p = e.features?.[0]?.properties;
         hover.remove();
         if (!p) return;
-        if (viewRef.current === "countries") setView("smart"); // next step: that country's cities
         enterScopeRef.current({ kind: "country", key: p.cc, label: p.name, code: p.cc });
       });
-      for (const layer of ["clusters", "place-points", "country-bubbles", "area-bubbles", "area-clusters"]) {
+      for (const layer of ["clusters", "place-points", "country-bubbles", "area-bubbles", "area-clusters", "area-minor"]) {
         map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
         map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
       }
@@ -300,14 +335,19 @@ export function MapView() {
   // Push data into the map and show the layers the current view needs (and only those).
   const planKey = JSON.stringify(plan);
   useEffect(() => {
-    placesRef.current = filtered;
+    placesRef.current = mapPins;
     planRef.current = plan;
     const map = mapRef.current;
     if (!map?.getSource("places")) return;
     const pins = map.getSource("places") as GeoJSONSource;
-    pins.setClusterOptions(plan.clustering);
-    pins.setData(toGeoJSON(filtered));
+    // Only touch the clustering setting when it really changes (re-setting it mid-animation can leave pins undrawn).
+    const clusterKey = JSON.stringify(plan.clustering);
+    if (clusterKeyRef.current !== clusterKey) { pins.setClusterOptions(plan.clustering); clusterKeyRef.current = clusterKey; }
     const areaData = plan.areas ? areaAggregates(filtered).areas : [];
+    // In a country's city view, small cities (1–2 places) show their pins instead of a bubble.
+    const pinCities = plan.areas ? rankAreas(areaData).pinCities : null;
+    const focusCity = scope?.kind === "city" ? scope.key : null;
+    pins.setData(toGeoJSON(pinCities ? filtered.filter((p) => pinCities.has(areaKey(p))) : mapPins, focusCity));
     ensureAreaImages(map, areaData);
     (map.getSource("areas") as GeoJSONSource).setData(areaGeoJSON(areaData));
     const countries = map.getSource("countries") as GeoJSONSource;
@@ -315,7 +355,14 @@ export function MapView() {
     countries.setData(countryGeoJSON(aggs));
     void ensureCountryImages(map, aggs, () => countries.setData(countryGeoJSON(aggs)));
     applyPlan(map, plan);
-  }, [filtered, planKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Make sure the new markers are drawn as soon as the zoom-in finishes, without needing to move the mouse.
+    const pinData = toGeoJSON(pinCities ? filtered.filter((p) => pinCities.has(areaKey(p))) : mapPins, focusCity);
+    const redraw = () => { pins.setData(pinData); map.triggerRepaint(); };
+    map.triggerRepaint();
+    map.once("moveend", redraw);
+    const t = window.setTimeout(redraw, 700);
+    return () => { map.off("moveend", redraw); window.clearTimeout(t); };
+  }, [filtered, mapPins, planKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switch base map; the choice is remembered for next time.
   useEffect(() => {
@@ -412,18 +459,6 @@ export function MapView() {
       </div>
 
       <div className="map-style-wrap">
-        <div className="map-view-switch" role="tablist" aria-label="Map view">
-          {VIEWS.map((v) => (
-            <button key={v.key} role="tab" aria-selected={view === v.key} className={view === v.key ? "active" : ""} title={v.hint}
-                    onClick={() => {
-                      setView(v.key);
-                      if (v.key === "countries") { if (scope) enterScope(undefined); }        // back out to the world
-                      else if (scope?.kind === "city" && v.key !== "smart") enterScope(scope.parent); // a city already shows its pins
-                    }}>
-              {v.label}
-            </button>
-          ))}
-        </div>
         <button className={`map-style-btn ${styleMenu ? "is-on" : ""}`} onClick={() => setStyleMenu((o) => !o)} aria-haspopup="menu" aria-expanded={styleMenu} title="Map style">
           <LayersIcon /> {MAP_STYLES.find((s) => s.id === styleId)?.label}
         </button>
@@ -620,7 +655,7 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
   return (
     <div className="map-preview" key={place.id}>
       <div className="map-preview-hero">
-        <Thumb path={hero} fallback={<CategoryBadge category={place.category} size={64} />} />
+        <Thumb path={hero} focus={place.heroFocus} fallback={<CategoryBadge category={place.category} size={64} />} />
         <div className="map-preview-shade" />
         <button className="map-preview-close" onClick={onClose} aria-label="Close">✕</button>
         <div className="map-preview-title">
@@ -656,40 +691,32 @@ function MapPreview({ place, onClose, onOpen }: { place: Place; onClose: () => v
 
 type Scope = { kind: "country" | "city"; key: string; label: string; code: string | null; parent?: Scope; compact?: boolean };
 
-type MapViewKind = "smart" | "countries" | "cities" | "places";
-
-const VIEWS: { key: MapViewKind; label: string; hint: string }[] = [
-  { key: "smart", label: "Smart", hint: "Country → city → place as you go" },
-  { key: "countries", label: "Countries", hint: "One bubble per country" },
-  { key: "cities", label: "Cities", hint: "One bubble per city (nearby cities merge)" },
-  { key: "places", label: "Places", hint: "Every place as a pin" },
-];
-
 type Range = [number, number] | null;
 type Clustering = { cluster: boolean; clusterRadius: number; clusterMaxZoom: number };
-/** Which markers show at which zooms. Each zoom shows one kind of marker, never a mix. */
-interface Plan { countries: Range; areas: Range; pins: Range; clustering: Clustering }
+/** Which markers show. One kind at a time: countries, or a country's cities, or a city's places. */
+interface Plan { countries: Range; areas: Range; pins: Range; clustering: Clustering; labelsFrom: number }
 
-const CLUSTERED: Clustering = { cluster: true, clusterRadius: 44, clusterMaxZoom: 10 };
+/** A country this small goes straight to its pins (no city step). */
+const FEW_PLACES = 5;
+
 const FLAT: Clustering = { cluster: false, clusterRadius: 44, clusterMaxZoom: 10 };
 
-function planFor(view: MapViewKind, scope: Scope | undefined): Plan {
-  // A picked city: every pin in it, no bubbles, no clusters — whatever the view.
-  if (scope?.kind === "city") return { countries: null, areas: null, pins: [0, 24], clustering: FLAT };
-  switch (view) {
-    case "countries": return { countries: [0, 24], areas: null, pins: null, clustering: CLUSTERED };
-    case "cities": return { countries: null, areas: [0, 24], pins: null, clustering: CLUSTERED };
-    case "places": return { countries: null, areas: null, pins: [0, 24], clustering: scope?.compact ? FLAT : CLUSTERED };
-    default:
-      if (!scope) return { countries: [0, COUNTRY_MAX_ZOOM], areas: null, pins: [COUNTRY_MAX_ZOOM, 24], clustering: CLUSTERED };
-      if (scope.compact) return { countries: null, areas: null, pins: [0, 24], clustering: FLAT };
-      return { countries: null, areas: [0, AREA_MAX_ZOOM], pins: [AREA_MAX_ZOOM, 24], clustering: FLAT };
+function planFor(scope: Scope | undefined, inScope: Place[]): Plan {
+  const pins: Plan = { countries: null, areas: null, pins: [0, 24], clustering: FLAT, labelsFrom: 11 };
+  if (scope?.kind === "city") return pins;
+  if (scope?.kind === "country") {
+    // One or a few places, or all in one city: show them directly (named), no extra city step.
+    const oneCity = new Set(inScope.map(areaKey)).size <= 1;
+    if (inScope.length <= FEW_PLACES || oneCity) return { ...pins, labelsFrom: 0 };
+    // City bubbles, plus the pins of small cities (see rankAreas).
+    return { countries: null, areas: [0, 24], pins: [0, 24], clustering: FLAT, labelsFrom: 11 };
   }
+  return { countries: [0, 24], areas: null, pins: null, clustering: FLAT, labelsFrom: 11 };
 }
 
 const LAYER_GROUPS: Record<"countries" | "areas" | "pins", string[]> = {
   countries: ["country-bubbles"],
-  areas: ["area-cluster-ring", "area-clusters", "area-cluster-count", "area-bubbles"],
+  areas: ["area-cluster-ring", "area-clusters", "area-cluster-count", "area-minor", "area-bubbles"],
   pins: ["cluster-ring", "clusters", "cluster-count", "place-points", "place-selected", "place-labels"],
 };
 
@@ -700,7 +727,7 @@ function applyPlan(map: MLMap, plan: Plan) {
     for (const id of LAYER_GROUPS[group]) {
       if (!map.getLayer(id)) continue;
       map.setLayoutProperty(id, "visibility", range ? "visible" : "none");
-      if (range) map.setLayerZoomRange(id, id === "place-labels" ? Math.max(range[0], 11) : range[0], range[1]);
+      if (range) map.setLayerZoomRange(id, id === "place-labels" ? Math.max(range[0], plan.labelsFrom) : range[0], range[1]);
     }
   });
 }
@@ -728,7 +755,8 @@ function suggest(places: Place[], query: string, scope?: Scope): Suggestion[] {
   const cities = new Map<string, { country: string | null; code: string | null; count: number }>();
   for (const p of places) {
     if (p.countryCode && p.country) countries.set(p.countryCode, { name: p.country, count: (countries.get(p.countryCode)?.count ?? 0) + 1 });
-    if (p.city && p.city !== p.canonicalName) cities.set(p.city, { country: p.country, code: p.countryCode, count: (cities.get(p.city)?.count ?? 0) + 1 });
+    const city = areaKey(p);
+    if (city && city !== p.canonicalName) cities.set(city, { country: p.country, code: p.countryCode, count: (cities.get(city)?.count ?? 0) + 1 });
     const r = Math.min(rank(p.canonicalName), ...p.alternativeNames.map(rank));
     if (r < 9) {
       const cat = CATEGORY[p.category] ?? CATEGORY.other;
@@ -762,10 +790,10 @@ function browse(places: Place[], scope?: Scope): Suggestion[] {
     return count((p) => p.countryCode).slice(0, 10).map(([code, ps]) => ({ kind: "country", key: code, label: ps[0].country ?? code, sub: n(ps.length), code }));
   }
   if (scope.kind === "country") {
-    const cities: Suggestion[] = count((p) => (p.city && p.city !== p.canonicalName ? p.city : null)).slice(0, 6)
+    const cities: Suggestion[] = count((p) => (areaKey(p) !== p.canonicalName ? areaKey(p) : null)).slice(0, 6)
       .map(([city, ps]) => ({ kind: "city", key: city, label: city, sub: n(ps.length), code: scope.code }));
     const shown = new Set(cities.map((c) => c.key));
-    const places2 = places.filter((p) => !p.city || !shown.has(p.city)).sort((a, b) => b.sourceCount - a.sourceCount).slice(0, 10 - cities.length).map(placeRow);
+    const places2 = places.filter((p) => !shown.has(areaKey(p))).sort((a, b) => b.sourceCount - a.sourceCount).slice(0, 10 - cities.length).map(placeRow);
     return [...cities, ...places2];
   }
   return [...places].sort((a, b) => b.sourceCount - a.sourceCount).slice(0, 10).map(placeRow);
@@ -837,20 +865,37 @@ function SearchIcon() {
   );
 }
 
-function toGeoJSON(places: Place[]): GeoJSON.FeatureCollection {
+/**
+ * Pins as GeoJSON. Inside a picked city (`focusCity`), that city's own pins are "focus" (full size, named) and
+ * the neighbours around it are smaller and faded; the place that *is* the city (e.g. "Beijing") is "cityPlace":
+ * the biggest pin, always drawn on top.
+ */
+/** "Xi'an" = "Xian" = "xi an": compare names ignoring case, accents and punctuation. */
+function sameName(a: string, b: string): boolean {
+  const n = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  return n(a) === n(b);
+}
+
+function toGeoJSON(places: Place[], focusCity?: string | null): GeoJSON.FeatureCollection {
+  // Only a city with its own label (enough evidence behind it) gets the big, on-top city pin.
+  const labelled = !!focusCity && places.filter((p) => areaKey(p) === focusCity).reduce((n, p) => n + support(p), 0) > PIN_CITY_MAX;
   return {
     type: "FeatureCollection",
-    features: places.map((p) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [p.longitude, p.latitude] },
-      properties: { id: p.id, name: p.canonicalName, category: groupOf(p.category), status: p.personalStatus },
-    })),
+    features: places.map((p) => {
+      const inFocus = !focusCity || areaKey(p) === focusCity;
+      // The city's own pin is the place named like the city label (e.g. "Shanghai"), whatever kind it was saved as —
+      // never a road or hotel that happens to be marked "region".
+      const isCity = labelled && inFocus && [p.canonicalName, ...p.alternativeNames].some((n) => sameName(n, focusCity!));
+      return {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.longitude, p.latitude] },
+        properties: { id: p.id, name: p.canonicalName, category: groupOf(p.category), status: p.personalStatus, focus: inFocus, cityPlace: isCity },
+      };
+    }),
   };
 }
 
-/** World view: zoom 0–3 country bubbles · 3.5–10 clusters (see CLUSTERING) · 10+ individual places. */
-const COUNTRY_MAX_ZOOM = 3.5;
-/** Inside a picked country, city/region bubbles give way to individual pins at this zoom. */
+/** Inside a country, nearby city bubbles merge until this zoom so they never pile up. */
 const AREA_MAX_ZOOM = 11;
 /** Picking a city zooms to about street/neighbourhood level. */
 const CITY_ZOOM = 11;
@@ -859,20 +904,24 @@ const CITY_ZOOM = 11;
 const COMPACT_ZOOM = 5;
 
 /** Fits the map to places. `minZoom` = zoom at least this close; "compact" = past clustering if the places are close together. */
-function fit(map: MLMap, places: Place[], minZoom?: number | "compact") {
-  if (places.length === 0) return;
+/** Fits the map to places and returns the zoom it moves to. */
+function fit(map: MLMap, places: Place[], minZoom?: number | "compact"): number | undefined {
+  if (places.length === 0) return undefined;
   if (places.length === 1) {
-    map.easeTo({ center: [places[0].longitude, places[0].latitude], zoom: Math.max(12, typeof minZoom === "number" ? minZoom : 0) });
-    return;
+    const z = Math.max(12, typeof minZoom === "number" ? minZoom : 0);
+    map.easeTo({ center: [places[0].longitude, places[0].latitude], zoom: z });
+    return z;
   }
   const bounds = new maplibregl.LngLatBounds();
   places.forEach((p) => bounds.extend([p.longitude, p.latitude]));
   const camera = map.cameraForBounds(bounds, { padding: 80, maxZoom: 14 });
-  if (!camera) return;
+  if (!camera) return undefined;
   const zoom = camera.zoom ?? 0;
   // A city: zoom to ~11–12, unless that would cut off some of its places.
   const floor = minZoom === "compact" ? 0 : minZoom !== undefined && zoom >= minZoom - 2 ? minZoom : 0;
-  map.easeTo({ ...camera, zoom: Math.min(Math.max(zoom, floor), 12.5), duration: 600 });
+  const target = Math.min(Math.max(zoom, floor), 12.5);
+  map.easeTo({ ...camera, zoom: target, duration: 600 });
+  return target;
 }
 
 /** First-run guidance: permission → AI key → scan. */

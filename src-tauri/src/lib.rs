@@ -162,6 +162,11 @@ pub fn run() {
                 }
             });
 
+            // Pins with no screenshot or Reel behind them go (places you added by hand stay).
+            {
+                let removed = app.state::<AppState>().db.remove_unsupported_places().unwrap_or(0);
+                if removed > 0 { log::info!("removed {removed} places with no screenshot or Reel left"); }
+            }
             // Ignored screenshots/Reels never affect places or the map (also for items ignored by older versions).
             {
                 let db = app.state::<AppState>().db.clone();
@@ -234,6 +239,13 @@ pub fn run() {
             commands::attach_memories,
             commands::remove_memory,
             commands::update_fact,
+            commands::add_place_photos,
+            commands::add_place_photo_bytes,
+            commands::update_image_caption,
+            commands::set_cover_source,
+            commands::recent_reviews,
+            commands::change_review,
+            commands::source_reviews,
             commands::count_screenshots,
             commands::screenshot_refs,
             commands::add_fact,

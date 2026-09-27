@@ -200,6 +200,7 @@ impl Pipeline {
             }
         };
         self.time("reels.total", start);
+        let _ = self.db.remove_unsupported_places();
         self.notify();
         status
     }

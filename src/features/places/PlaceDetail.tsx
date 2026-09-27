@@ -13,6 +13,8 @@ import { useAction, useLoad, useNav } from "../../lib/nav";
 import { quietBasemap } from "../map/MapView";
 import { resolveMapStyle } from "../../lib/mapStyle";
 import { MyVisit } from "./MyVisit";
+import { PlacePhotos } from "./PlacePhotos";
+import { HeroPhoto } from "./HeroPhoto";
 import { openUrl } from "../../lib/open";
 
 export function PlaceDetail({ id }: { id: string }) {
@@ -39,7 +41,7 @@ export function PlaceDetail({ id }: { id: string }) {
 
   return (
     <div>
-      <div className="hero"><Thumb path={hero} fallback={<CategoryBadge category={place.category} size={72} />} /></div>
+      <HeroPhoto place={place} path={hero} />
 
       <div className="detail-head">
         <EditableName place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "canonicalName", v))} />
@@ -83,51 +85,8 @@ export function PlaceDetail({ id }: { id: string }) {
       <div className="add-fact-bar"><AddFact places={[place]} /></div>
       <InfoCards facts={data.facts} nearby={data.nearby} warned={new Set(data.warnings.flatMap((w) => w.factIds))} />
 
-      {data.images.length > 0 && (
-        <>
-          <div className="section"><h3>Photos from your sources</h3><span className="muted small">{data.images.filter((i) => i.isAccepted).length}</span></div>
-          <div className="grid small-tiles">
-            {data.images.filter((i) => i.isAccepted).map((img) => (
-              <div key={img.id} className="tile">
-                <Thumb path={img.imagePath} />
-                <div className="tile-body row">
-                  {place.heroImageId === img.id ? <Pill tone="ok">Cover</Pill> :
-                    <button className="btn small" onClick={() => action.run(() => PlaceService.update(place.id, "heroImageId", img.id))}>Set cover</button>}
-                  <button className="btn small danger" onClick={() => action.run(() => PlaceService.removeImage(img.id))}>Remove</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <div className="section"><h3>Sources</h3><span className="muted small">{data.screenshots.length + data.reels.length}</span></div>
-      <div className="grid small-tiles">
-        {data.reels.map((r) => (
-          <div key={r.id} className="tile portrait source-tile" onClick={() => nav.openReel(r.id)}>
-            <Thumb path={r.thumbnailPath} fallback="🎬" />
-            <button className="close-btn small not-travel-x source-x" title="Move this Reel to Not travel (the place stays if other sources support it)" aria-label="Move to Not travel"
-                    onClick={(e) => { e.stopPropagation(); void notTravel(() => ReelService.action(r.id, "markNotTravel")); }}>✕</button>
-            <div className="tile-body">
-              <span className="small strong tile-title">🎬 Reel {r.creator ?? ""}</span>
-              <span className="muted small">{formatDate(r.createdAt)}</span>
-              {r.status === "needsReview" && <span><Pill tone="warn">Needs review</Pill></span>}
-            </div>
-          </div>
-        ))}
-        {data.screenshots.map((s) => (
-          <div key={s.id} className="tile portrait source-tile" onClick={() => nav.openScreenshot(s.id)}>
-            <Thumb path={s.thumbnailPath} />
-            <button className="close-btn small not-travel-x source-x" title="Move this screenshot to Not travel (the place stays if other sources support it)" aria-label="Move to Not travel"
-                    onClick={(e) => { e.stopPropagation(); void notTravel(() => ScreenshotService.action(s.id, "markNotTravel")); }}>✕</button>
-            <div className="tile-body">
-              <span className="small">{formatDate(s.creationDate)}</span>
-              <span className="muted small tile-title">{SOURCE[s.sourceType]}</span>
-              {s.status === "needsReview" && <span><Pill tone="warn">Needs review</Pill></span>}
-            </div>
-          </div>
-        ))}
-      </div>
+      <PlacePhotos place={place} images={data.images} screenshots={data.screenshots} reels={data.reels}
+        onNotTravel={(kind, sid) => void notTravel(() => (kind === "reel" ? ReelService.action(sid, "markNotTravel") : ScreenshotService.action(sid, "markNotTravel")))} />
 
       {data.trips.length > 0 && (
         <>
@@ -142,7 +101,12 @@ export function PlaceDetail({ id }: { id: string }) {
       {dialog === "location" && (
         <PlaceSearchDialog title="Correct location" includeSaved={false} initialQuery={[place.canonicalName, place.city, place.country].filter(Boolean).join(", ")}
           onClose={() => setDialog(null)}
-          onPick={async (c) => { setDialog(null); await action.run(() => PlaceService.setLocation(place.id, c)); }} />
+          onPick={async (c) => {
+            setDialog(null);
+            const shown = await action.run(() => PlaceService.setLocation(place.id, c));
+            // Merged into a place you already had there: show that one instead.
+            if (shown && shown !== place.id) { nav.back(); nav.openPlace(shown); }
+          }} />
       )}
       {dialog === "merge" && <MergeDialog place={place} onClose={() => setDialog(null)} onMerged={(target) => { setDialog(null); nav.back(); nav.openPlace(target); }} />}
       {dialog === "split" && <SplitDialog detail={data} onClose={() => setDialog(null)} />}

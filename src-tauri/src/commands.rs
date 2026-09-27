@@ -214,9 +214,24 @@ pub async fn update_place(state: State<'_, AppState>, id: String, field: String,
 }
 
 #[tauri::command]
-pub async fn set_place_location(state: State<'_, AppState>, id: String, candidate: PlaceCandidate) -> CmdResult<()> {
-    state.db.update_place_location(&id, &candidate, Verification::UserVerified).map_err(err)?;
-    state.db.set_place_user_verified(&id).map_err(err)
+/// Moves a place to the right location. If that location is a place you already have (same Apple Maps place, or
+/// the same name right next to it), the two are merged — sources, tips and photos move over. Returns the place id
+/// to show (the merged one if they were merged).
+pub async fn set_place_location(state: State<'_, AppState>, id: String, candidate: PlaceCandidate) -> CmdResult<String> {
+    let db = &state.db;
+    let existing = match merge::find_match(db, &candidate, &[]).map_err(err)? {
+        merge::PlaceMatch::Same(p) if p.id != id => Some(p),
+        _ => None,
+    };
+    if let Some(target) = existing {
+        merge::merge_places(db, &id, &target.id).map_err(err)?;
+        db.set_place_user_verified(&target.id).map_err(err)?;
+        tidy(&state)?;
+        return Ok(target.id);
+    }
+    db.update_place_location(&id, &candidate, Verification::UserVerified).map_err(err)?;
+    db.set_place_user_verified(&id).map_err(err)?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -236,7 +251,14 @@ pub async fn split_place(state: State<'_, AppState>, place_id: String, screensho
 
 #[tauri::command]
 pub async fn remove_place_screenshot(state: State<'_, AppState>, place_id: String, screenshot_id: String) -> CmdResult<()> {
-    state.db.unlink(&place_id, &screenshot_id).map_err(err)
+    state.db.unlink(&place_id, &screenshot_id).map_err(err)?;
+    tidy(&state)
+}
+
+/// A pin with no screenshot or Reel behind it goes away (except places you added with + Add Place).
+fn tidy(state: &AppState) -> CmdResult<()> {
+    state.db.remove_unsupported_places().map_err(err)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -292,7 +314,7 @@ pub async fn screenshot_action(state: State<'_, AppState>, id: String, action: S
         "markNotTravel" => p.mark_not_travel(&id).map_err(err)?,
         other => return Err(format!("unknown action {other}")),
     }
-    Ok(())
+    tidy(&state)
 }
 
 #[tauri::command]
@@ -302,7 +324,9 @@ pub async fn add_place_to_screenshot(state: State<'_, AppState>, screenshot_id: 
 
 #[tauri::command]
 pub async fn correct_place(state: State<'_, AppState>, screenshot_id: String, wrong_place_id: String, candidate: PlaceCandidate) -> CmdResult<String> {
-    state.pipeline.correct_place(&screenshot_id, &wrong_place_id, &candidate).map_err(err)
+    let id = state.pipeline.correct_place(&screenshot_id, &wrong_place_id, &candidate).map_err(err)?;
+    tidy(&state)?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -333,7 +357,8 @@ pub async fn list_reviews(state: State<'_, AppState>) -> CmdResult<Value> {
 
 #[tauri::command]
 pub async fn resolve_review(state: State<'_, AppState>, id: String, action: String, candidate: Option<PlaceCandidate>) -> CmdResult<()> {
-    state.pipeline.resolve_review(&id, &action, candidate).await.map_err(err)
+    state.pipeline.resolve_review(&id, &action, candidate).await.map_err(err)?;
+    tidy(&state)
 }
 
 // MARK: Trips
@@ -500,7 +525,7 @@ pub async fn reel_action(state: State<'_, AppState>, id: String, action: String)
         }
         other => return Err(format!("unknown action {other}")),
     }
-    Ok(())
+    tidy(&state)
 }
 
 #[tauri::command]
@@ -649,7 +674,7 @@ pub async fn add_manual_place(
         .and_then(PlaceCategory::try_parse)
         .or_else(|| candidate.category_hint())
         .unwrap_or_default();
-    let place = db.insert_place(&candidate, category, Verification::UserVerified, DataOrigin::User, &[]).map_err(err)?;
+    let place = db.insert_place(&candidate, category, Verification::UserVerified, DataOrigin::Manual, &[]).map_err(err)?;
     let status = PersonalStatus::try_parse(&status).unwrap_or_default();
     db.update_place_field(&place.id, "personalStatus", Some(status.as_str())).map_err(err)?;
     if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
@@ -771,6 +796,136 @@ pub async fn screenshot_refs(state: State<'_, AppState>, filter: Option<Screensh
         .into_iter().map(|(id, date)| json!({"id": id, "date": date})).collect())
 }
 
+/// Answered reviews, newest first, with what was chosen (Review → Recently reviewed).
+#[tauri::command]
+pub async fn recent_reviews(state: State<'_, AppState>) -> CmdResult<Value> {
+    let db = &state.db;
+    let mut out = Vec::new();
+    for r in db.recent_reviews(60).map_err(err)? {
+        let get = |id: Option<&str>| id.map(|id| db.place(id)).transpose().map(Option::flatten);
+        let a = get(r.place_a_id.as_deref()).map_err(err)?;
+        let b = get(r.place_b_id.as_deref()).map_err(err)?;
+        let chosen = get(r.resolved_place_id.as_deref()).map_err(err)?;
+        let img = r.image_id.as_deref().map(|id| db.image(id)).transpose().map_err(err)?.flatten();
+        let status = match (&r.screenshot_id, &r.reel_id) {
+            (Some(s), _) => db.screenshot(s).map_err(err)?.map(|s| s.status.as_str().to_string()),
+            (None, Some(rl)) => db.reel(rl).map_err(err)?.map(|r| r.status.as_str().to_string()),
+            _ => None,
+        };
+        out.push(json!({ "review": r, "placeA": a, "placeB": b, "chosen": chosen, "image": img, "sourceStatus": status }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Every review item (waiting and answered) for one screenshot or Reel — shown inside its viewer.
+#[tauri::command]
+pub async fn source_reviews(state: State<'_, AppState>, screenshot_id: Option<String>, reel_id: Option<String>) -> CmdResult<Value> {
+    let db = &state.db;
+    let reviews = match (screenshot_id.as_deref(), reel_id.as_deref()) {
+        (Some(s), _) => db.reviews_for_screenshot(s).map_err(err)?,
+        (None, Some(r)) => db.reviews_for_reel(r).map_err(err)?,
+        _ => vec![],
+    };
+    let mut out = Vec::new();
+    for r in reviews {
+        let get = |id: Option<&str>| id.map(|id| db.place(id)).transpose().map(Option::flatten);
+        let a = get(r.place_a_id.as_deref()).map_err(err)?;
+        let b = get(r.place_b_id.as_deref()).map_err(err)?;
+        let chosen = get(r.resolved_place_id.as_deref()).map_err(err)?;
+        let img = r.image_id.as_deref().map(|id| db.image(id)).transpose().map_err(err)?.flatten();
+        out.push(json!({ "review": r, "placeA": a, "placeB": b, "chosen": chosen, "image": img }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Changes an earlier review answer.
+#[tauri::command]
+pub async fn change_review(state: State<'_, AppState>, id: String, action: String, candidate: Option<PlaceCandidate>) -> CmdResult<()> {
+    state.pipeline.change_review(&id, &action, candidate).await.map_err(err)?;
+    tidy(&state)
+}
+
+// MARK: Your own photos on a place (file picker, paste, drag & drop)
+
+async fn save_place_photo(state: &AppState, place_id: &str, source: &std::path::Path) -> anyhow::Result<String> {
+    let dir = state.pipeline.data_dir.join("crops");
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(format!("{}.jpg", new_id()));
+    // The Photos helper reads any image macOS understands (HEIC, PNG, JPEG, WebP…), fixes orientation and downsizes.
+    state.pipeline.photos.crop_image(source, &dest, Rect::new(0.0, 0.0, 1.0, 1.0), 2048).await?;
+    state.db.insert_image(place_id, None, Rect::new(0.0, 0.0, 1.0, 1.0), &dest.to_string_lossy(), 1.0, RegionType::Photograph,
+                          1.0, None, true, DataOrigin::User)
+}
+
+/// Adds image files to a place as your own photos. Returns how many were added.
+#[tauri::command]
+pub async fn add_place_photos(state: State<'_, AppState>, place_id: String, paths: Vec<String>) -> CmdResult<usize> {
+    state.db.place(&place_id).map_err(err)?.ok_or("Place not found")?;
+    let mut added = 0;
+    let mut last = None;
+    for p in &paths {
+        match save_place_photo(&state, &place_id, std::path::Path::new(p)).await {
+            Ok(_) => added += 1,
+            Err(e) => last = Some(e.to_string()),
+        }
+    }
+    if added == 0 {
+        return Err(last.map(|e| format!("Couldn't add that image: {e}")).unwrap_or_else(|| "No images to add.".into()));
+    }
+    Ok(added)
+}
+
+/// Adds a pasted image (raw bytes from the clipboard) to a place.
+#[tauri::command]
+pub async fn add_place_photo_bytes(state: State<'_, AppState>, place_id: String, bytes: Vec<u8>, ext: String) -> CmdResult<String> {
+    state.db.place(&place_id).map_err(err)?.ok_or("Place not found")?;
+    let ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).take(5).collect();
+    let tmp = state.pipeline.data_dir.join("tmp");
+    std::fs::create_dir_all(&tmp).map_err(err)?;
+    let file = tmp.join(format!("{}.{}", new_id(), if ext.is_empty() { "png".into() } else { ext }));
+    std::fs::write(&file, &bytes).map_err(err)?;
+    let result = save_place_photo(&state, &place_id, &file).await;
+    let _ = std::fs::remove_file(&file);
+    result.map_err(|e| format!("Couldn't add the pasted image: {e}"))
+}
+
+/// Makes a screenshot or Reel the place's cover: reuses a photo already cut from it, otherwise its whole picture.
+#[tauri::command]
+pub async fn set_cover_source(state: State<'_, AppState>, place_id: String, screenshot_id: Option<String>, reel_id: Option<String>) -> CmdResult<String> {
+    let db = &state.db;
+    let existing = db.images_for_place(&place_id).map_err(err)?.into_iter().find(|i| {
+        i.is_accepted && ((screenshot_id.is_some() && i.screenshot_id == screenshot_id) || (reel_id.is_some() && i.reel_id == reel_id))
+    });
+    let image_id = match existing {
+        Some(i) => i.id,
+        None => {
+            let path = if let Some(sid) = screenshot_id.as_deref() {
+                let s = db.screenshot(sid).map_err(err)?.ok_or("Screenshot not found")?;
+                s.image_path.or(s.thumbnail_path)
+            } else if let Some(rid) = reel_id.as_deref() {
+                db.reel(rid).map_err(err)?.ok_or("Reel not found")?.thumbnail_path
+            } else {
+                None
+            }.ok_or("This source has no picture to use")?;
+            let id = db.insert_image(&place_id, screenshot_id.as_deref(), Rect::new(0.0, 0.0, 1.0, 1.0), &path, 0.5, RegionType::Photograph,
+                                     1.0, None, true, DataOrigin::Local).map_err(err)?;
+            if let Some(rid) = reel_id.as_deref() { db.set_image_reel(&id, rid).map_err(err)?; }
+            id
+        }
+    };
+    db.update_place_field(&place_id, "coverMemoryId", None).map_err(err)?;
+    db.update_place_field(&place_id, "heroImageId", Some(&image_id)).map_err(err)?;
+    db.update_place_field(&place_id, "heroFocus", None).map_err(err)?;
+    Ok(image_id)
+}
+
+/// Saves your details/caption for a photo.
+#[tauri::command]
+pub async fn update_image_caption(state: State<'_, AppState>, id: String, caption: String) -> CmdResult<()> {
+    state.db.with(|c| c.execute("UPDATE place_images SET caption = ?2 WHERE id = ?1", rusqlite::params![id, caption.trim()])).map_err(err)?;
+    Ok(())
+}
+
 // MARK: Editing processed results (your edits are kept when something is reprocessed)
 
 /// Edits a saved tip/fact. It becomes yours (origin "user"), so reprocessing never overwrites it.
@@ -832,5 +987,6 @@ pub async fn add_place_to_reel(state: State<'_, AppState>, reel_id: String, cand
 /// Removes a place from a Reel (the place stays if it has other sources or your own data).
 #[tauri::command]
 pub async fn remove_place_from_reel(state: State<'_, AppState>, place_id: String, reel_id: String) -> CmdResult<()> {
-    state.db.unlink_reel(&place_id, &reel_id).map_err(err)
+    state.db.unlink_reel(&place_id, &reel_id).map_err(err)?;
+    tidy(&state)
 }

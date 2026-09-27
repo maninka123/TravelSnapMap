@@ -44,6 +44,10 @@ pub struct PlaceRecord {
     pub visit_notes: String,
     pub cover_memory_id: Option<String>,
     pub memory_count: i64,
+    /// Photos you added yourself (file, paste, drag & drop).
+    pub user_photo_count: i64,
+    /// Where the cover photo is centred in its frame, e.g. "30% 60%" (you set it by dragging the photo).
+    pub hero_focus: Option<String>,
 }
 
 pub const PLACE_COLUMNS: &str = "p.id, p.canonical_name, p.alternative_names, p.map_identifier, p.latitude, p.longitude, \
@@ -57,7 +61,8 @@ pub const PLACE_COLUMNS: &str = "p.id, p.canonical_name, p.alternative_names, p.
     COALESCE((SELECT s.thumbnail_path FROM place_screenshots ps JOIN screenshots s ON s.id = ps.screenshot_id \
        WHERE ps.place_id = p.id AND s.thumbnail_path IS NOT NULL ORDER BY s.creation_date DESC LIMIT 1), \
     (SELECT rl.thumbnail_path FROM place_reels pr JOIN reels rl ON rl.id = pr.reel_id WHERE pr.place_id = p.id AND rl.thumbnail_path IS NOT NULL LIMIT 1)), \
-    p.visited_at, p.visit_notes, p.cover_memory_id, (SELECT COUNT(*) FROM place_memories m WHERE m.place_id = p.id)";
+    p.visited_at, p.visit_notes, p.cover_memory_id, (SELECT COUNT(*) FROM place_memories m WHERE m.place_id = p.id), \
+    (SELECT COUNT(*) FROM place_images ui WHERE ui.place_id = p.id AND ui.origin = 'user'), p.hero_focus";
 
 impl PlaceRecord {
     pub fn from_row(r: &Row) -> rusqlite::Result<Self> {
@@ -92,6 +97,8 @@ impl PlaceRecord {
             visit_notes: r.get(27)?,
             cover_memory_id: r.get(28)?,
             memory_count: r.get(29)?,
+            user_photo_count: r.get(30)?,
+            hero_focus: r.get(31)?,
         })
     }
 
@@ -287,10 +294,14 @@ pub struct PlaceImageRecord {
     pub created_at: String,
     #[serde(skip)]
     pub feature_print: Option<Vec<f32>>,
+    /// Your own details for a photo you added.
+    pub caption: String,
+    /// The Reel it came from, if any.
+    pub reel_id: Option<String>,
 }
 
 pub const IMAGE_COLUMNS: &str = "id, place_id, screenshot_id, crop_x, crop_y, crop_width, crop_height, image_path, \
-    quality_score, region_type, region_confidence, is_accepted, origin, duplicate_source_ids, created_at, feature_print";
+    quality_score, region_type, region_confidence, is_accepted, origin, duplicate_source_ids, created_at, feature_print, caption, reel_id";
 
 impl PlaceImageRecord {
     pub fn from_row(r: &Row) -> rusqlite::Result<Self> {
@@ -309,6 +320,8 @@ impl PlaceImageRecord {
             duplicate_source_ids: json_vec(r.get(13)?),
             created_at: r.get(14)?,
             feature_print: blob.map(|b| b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()),
+            caption: r.get(16)?,
+            reel_id: r.get(17)?,
         })
     }
 }
@@ -342,10 +355,14 @@ pub struct ReviewRecord {
     pub resolution: Option<String>,
     pub created_at: String,
     pub screenshot_thumbnail: Option<String>,
+    /// When you answered it (Recently reviewed) and the place you chose, if any.
+    pub resolved_at: Option<String>,
+    pub resolved_place_id: Option<String>,
 }
 
 pub const REVIEW_COLUMNS: &str = "r.id, r.kind, r.screenshot_id, r.message, r.extracted_place, r.candidates, r.place_a_id, \
-    r.place_b_id, r.image_id, r.is_resolved, r.resolution, r.created_at, COALESCE(s.thumbnail_path, rl.thumbnail_path), r.reel_id";
+    r.place_b_id, r.image_id, r.is_resolved, r.resolution, r.created_at, COALESCE(s.thumbnail_path, rl.thumbnail_path), r.reel_id, \
+    r.resolved_at, r.resolved_place_id";
 
 impl ReviewRecord {
     pub fn from_row(r: &Row) -> rusqlite::Result<Self> {
@@ -366,6 +383,8 @@ impl ReviewRecord {
             created_at: r.get(11)?,
             screenshot_thumbnail: r.get(12)?,
             reel_id: r.get(13)?,
+            resolved_at: r.get(14)?,
+            resolved_place_id: r.get(15)?,
         })
     }
 }

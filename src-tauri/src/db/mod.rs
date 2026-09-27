@@ -33,7 +33,7 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// (schema version reached, SQL). Append new steps; never edit a shipped one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -41,6 +41,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("migration_v2.sql")),
     (3, include_str!("migration_v3.sql")),
     (4, include_str!("migration_v4.sql")),
+    (5, include_str!("migration_v5.sql")),
+    (6, include_str!("migration_v6.sql")),
 ];
 
 /// Library open failures, worded for people rather than developers.
@@ -298,16 +300,16 @@ mod migration_tests {
         {
             let db = Database::open(&path).unwrap();
             db.set_setting("marker", Some("my data")).unwrap();
-            // Pretend this library is one version older: re-running v4 then fails ("duplicate column").
-            db.with(|c| c.execute_batch("PRAGMA user_version = 3")).unwrap();
+            // Pretend this library is one version older: re-running v6 then fails ("duplicate column").
+            db.with(|c| c.execute_batch("PRAGMA user_version = 5")).unwrap();
         }
         let err = Database::open(&path).err().expect("upgrade must fail").to_string();
-        assert!(err.contains("original library is intact") && err.contains("pre-migration-v3-to-v4"), "{err}");
+        assert!(err.contains("original library is intact") && err.contains("pre-migration-v5-to-v6"), "{err}");
 
         let conn = Connection::open(&path).unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         let marker: String = conn.query_row("SELECT value FROM settings WHERE key = 'marker'", [], |r| r.get(0)).unwrap();
-        assert_eq!((version, marker.as_str()), (3, "my data"), "the failed step was rolled back");
+        assert_eq!((version, marker.as_str()), (5, "my data"), "the failed step was rolled back");
         let backups: Vec<_> = std::fs::read_dir(dir.join("backups")).unwrap().collect();
         assert_eq!(backups.len(), 1);
         std::fs::remove_dir_all(dir).unwrap();

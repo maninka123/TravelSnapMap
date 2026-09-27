@@ -4,6 +4,7 @@ import { fileUrl, ReelService } from "../../api/services";
 import { CategoryChip, ErrorNote, PlaceLine, Pill, Thumb } from "../../components/common";
 import { AddFact, FactRow } from "../../components/FactsEditor";
 import { PlaceSearchDialog } from "../../components/PlacePicker";
+import { SourceReviews } from "../review/ReviewCards";
 import { formatDate, formatTime, PROCESSING, SOURCE_KIND } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { PhotosVideoPicker } from "./ImportReelDialog";
@@ -56,6 +57,8 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
         </div>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
+
+      <SourceReviews reelId={id} />
 
       {r.status === "needsMedia" && (
         <div className="disclaimer">

@@ -6,6 +6,7 @@ import { QuickAddPlace } from "./QuickAddPlace";
 import { CATEGORY, STATUS } from "../../lib/labels";
 import { CategoryBadge, GROUPS, groupOf, type CategoryGroup } from "../../lib/categoryIcons";
 import { useLoad, useNav } from "../../lib/nav";
+import { withMetro } from "../../lib/metro";
 
 export function PlacesView() {
   const nav = useNav();
@@ -15,8 +16,12 @@ export function PlacesView() {
   const { data: loaded, error } = useLoad(() => PlaceService.list(filter), [JSON.stringify(filter)]);
   // Kind of place is filtered by group (Food & drink, Stay, Sights…), the same groups as the map.
   const [group, setGroup] = useState<CategoryGroup | "">("");
-  const places = useMemo(() => (loaded ?? []).filter((p) => !group || groupOf(p.category) === group), [loaded, group]);
   const { data: all = [] } = useLoad(() => PlaceService.list({}), []);
+  const places = useMemo(() => {
+    // Cities are worked out from your whole library, so a filter never changes which city a place is in.
+    const metro = new Map(withMetro(all).map((p) => [p.id, p.metro]));
+    return (loaded ?? []).map((p) => ({ ...p, metro: metro.get(p.id) })).filter((p) => !group || groupOf(p.category) === group);
+  }, [loaded, all, group]);
   const { data: warnings = {} } = useLoad(() => PlaceService.warnings(), []);
 
   const countries = useMemo(() => {
@@ -51,7 +56,7 @@ export function PlacesView() {
       const key = p.country ?? "Unknown";
       g.set(key, [...(g.get(key) ?? []), p]);
     });
-    const cityOf = (p: (typeof places)[number]) => (p.city ?? p.canonicalName).toLowerCase();
+    const cityOf = (p: (typeof places)[number]) => (p.metro ?? p.city ?? p.canonicalName).toLowerCase();
     return [...g.entries()]
       .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
       .map(([country, items]) => {
@@ -120,7 +125,7 @@ export function PlacesView() {
               <div className="grid">
                 {items.map((p) => (
                 <div key={p.id} className="tile" onClick={() => nav.openPlace(p.id, order)}>
-                  <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
+                  <Thumb path={p.heroImagePath ?? p.thumbnailPath} focus={p.heroFocus} fallback={<CategoryBadge category={p.category} size={44} />} />
                   <div className="tile-body">
                     <div className="row"><span className="tile-title grow">{p.canonicalName}</span><StatusBadge place={p} /></div>
                     <PlaceLine place={p} />
@@ -147,7 +152,7 @@ export function PlacesView() {
               <div className="list">
                 {items.map((p) => (
                   <div key={p.id} className="list-row" onClick={() => nav.openPlace(p.id, order)}>
-                    <Thumb path={p.heroImagePath ?? p.thumbnailPath} fallback={<CategoryBadge category={p.category} size={44} />} />
+                    <Thumb path={p.heroImagePath ?? p.thumbnailPath} focus={p.heroFocus} fallback={<CategoryBadge category={p.category} size={44} />} />
                     <div className="grow">
                       <div className="strong">{p.canonicalName}</div>
                       <div className="muted small">{[p.city, CATEGORY[p.category]?.label].filter(Boolean).join(" · ")}</div>

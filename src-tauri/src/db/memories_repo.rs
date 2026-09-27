@@ -111,7 +111,41 @@ impl Database {
     }
 }
 
+/// SQL: the place (`places`) has no screenshot/Reel behind it and nothing you added — an automatic pin that
+/// lost its support. Places you added (+ Add Place) or put something into (notes, visit, your photos or tips,
+/// memories, a trip, a status) always stay.
+const UNSUPPORTED_AUTOMATIC: &str = "origin != 'manual' \
+    AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.place_id = places.id) \
+    AND NOT EXISTS (SELECT 1 FROM place_reels pr WHERE pr.place_id = places.id) \
+    AND notes = '' AND visit_notes = '' AND visited_at IS NULL AND personal_status = 'wantToVisit' \
+    AND NOT EXISTS (SELECT 1 FROM place_memories m WHERE m.place_id = places.id) \
+    AND NOT EXISTS (SELECT 1 FROM trip_places t WHERE t.place_id = places.id) \
+    AND NOT EXISTS (SELECT 1 FROM place_images i WHERE i.place_id = places.id AND i.origin = 'user') \
+    AND NOT EXISTS (SELECT 1 FROM travel_facts f WHERE f.place_id = places.id AND f.origin = 'user')";
+
 impl Database {
+    /// An automatic pin needs a screenshot or Reel behind it: removes the ones with none left and nothing of
+    /// yours (see UNSUPPORTED_AUTOMATIC), and open questions about them. Places created in the last couple of
+    /// minutes are left alone, so a scan that's attaching one right now is never interrupted.
+    pub fn remove_unsupported_places(&self) -> Result<usize> {
+        let settle = (chrono::Utc::now() - chrono::Duration::minutes(2)).to_rfc3339();
+        self.transaction(|tx| {
+            let n = tx.execute(&format!("DELETE FROM places WHERE created_at < ?1 AND {UNSUPPORTED_AUTOMATIC}"), [&settle])?;
+            tx.execute(
+                "DELETE FROM review_items WHERE is_resolved = 0 AND ((place_a_id IS NOT NULL AND place_a_id NOT IN (SELECT id FROM places)) \
+                 OR (place_b_id IS NOT NULL AND place_b_id NOT IN (SELECT id FROM places)))",
+                [],
+            )?;
+            Ok(n)
+        })
+    }
+
+    /// Removes this one place if it's an automatic pin with no support and nothing of yours.
+    pub fn remove_if_unsupported(&self, place_id: &str) -> Result<()> {
+        self.with(|c| c.execute(&format!("DELETE FROM places WHERE id = ?1 AND {UNSUPPORTED_AUTOMATIC}"), [place_id]))?;
+        Ok(())
+    }
+
     /// Ignoring a screenshot or Reel: it stays in "Ignored" but no longer affects anything — its place links,
     /// tips (yours too), photos and review items go. Places that only existed because of it are removed,
     /// unless you've put something into them (notes, a visit, your photos, a trip, a status).
@@ -133,15 +167,7 @@ impl Database {
             tx.execute(&format!("DELETE FROM review_items WHERE {column} = ?1"), [id])?;
             let mut removed = 0;
             for place in places {
-                removed += tx.execute(
-                    "DELETE FROM places WHERE id = ?1 \
-                     AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.place_id = places.id) \
-                     AND NOT EXISTS (SELECT 1 FROM place_reels pr WHERE pr.place_id = places.id) \
-                     AND NOT EXISTS (SELECT 1 FROM trip_places t WHERE t.place_id = places.id) \
-                     AND NOT EXISTS (SELECT 1 FROM place_memories m WHERE m.place_id = places.id) \
-                     AND notes = '' AND visit_notes = '' AND visited_at IS NULL AND personal_status = 'wantToVisit'",
-                    [&place],
-                )?;
+                removed += tx.execute(&format!("DELETE FROM places WHERE id = ?1 AND {UNSUPPORTED_AUTOMATIC}"), [&place])?;
             }
             // Duplicate-place questions that involved a removed place are moot.
             tx.execute(
@@ -185,6 +211,15 @@ mod tests {
         assert!(db.place(&shared.id).unwrap().is_some(), "still backed by another screenshot");
         assert!(db.place(&noted.id).unwrap().is_some(), "you wrote notes on it");
         assert!(db.places_for_screenshot("s1").unwrap().is_empty());
+
+        // A place you added by hand stays with no screenshots; an automatic one without support goes.
+        let manual = db.insert_place(&candidate("Added by me", 9.0), PlaceCategory::Beach, Verification::UserVerified, DataOrigin::Manual, &[]).unwrap();
+        let stray = db.insert_place(&candidate("Leftover", 9.5), PlaceCategory::Beach, Verification::Verified, DataOrigin::Ai, &[]).unwrap();
+        db.with(|c| c.execute("UPDATE places SET created_at = '2020-01-01T00:00:00+00:00'", [])).unwrap();
+        db.remove_unsupported_places().unwrap();
+        assert!(db.place(&manual.id).unwrap().is_some(), "added by hand");
+        assert!(db.place(&stray.id).unwrap().is_none(), "automatic, nothing behind it");
+        assert!(db.place(&noted.id).unwrap().is_some(), "still has your notes");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

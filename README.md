@@ -10,18 +10,29 @@ macOS 15+, local-first.
 
 ## Features
 
-- **Screenshots → places.** Scans Apple Photos (or any folder) for new screenshots, reads them on your Mac with Apple
-  Vision, and finds the places, tips, prices and hours in them. Clearly unrelated screenshots never leave your Mac.
-- **Instagram Reels.** Paste one link, a list, or a text file of links. The audio is transcribed on-device, key frames are
-  read, and the places mentioned are added with the exact moment they're mentioned.
-- **Map.** A personal world map: flag bubbles per country when zoomed out, clusters showing what's inside, then
-  category pins — plus type-ahead search, filters, a list of the places in view, and a choice of map styles.
-- **Place pages.** Every fact shows its source. Different advice from different sources is kept side by side, and
-  **Before you go** warns about out-of-date or conflicting info.
-- **Trips and memories.** Group places into trips and days. After you've been, add the date, your notes and your own
-  photos from Photos (found by location or date).
-- **Review inbox** for anything uncertain. **Add Place** for places you know without a screenshot.
-- **Backup and export** to a .zip, JSON or GeoJSON.
+| Area | What it does |
+| --- | --- |
+| **Screenshots → places** | Scans Apple Photos (or any folder) for new screenshots, reads them on your Mac with Apple Vision and finds the places, tips, prices and opening hours. Clearly unrelated screenshots never leave your Mac. Screenshots already done are always skipped. |
+| **Instagram Reels** | Paste one link, a list or a text file of links. Audio is transcribed on-device, key frames are read, and each place is saved with the moment it's mentioned. |
+| **Map** | Country flag bubbles → click a country for its city bubbles → click a city for its pins. Suburbs and districts are grouped under their real city (Surry Hills → Sydney, Pudong → Shanghai). Well-supported cities get their own label; a city's own pin stands out. Category icons, filters, type-ahead search, an "In view" list and five map styles. |
+| **Places** | Grouped by country, with places in the same city next to each other. Each place page shows every tip with its source, keeps conflicting advice side by side, and warns about out-of-date or conflicting info (**Before you go**). |
+| **Photos & sources** | One grid per place: its screenshots and Reels plus your own photos. Add photos by drag & drop, paste (⌘V) or file picker (HEIC works); add details to any photo; set any card as the cover and drag the cover to choose what shows. |
+| **Editing** | Edit, delete or add tips; change or remove a place on a screenshot or Reel; correct a location (it merges with a place you already have there); mark a source **Not travel** or **Ignore** it. Your edits survive reprocessing. |
+| **Review** | Everything uncertain in one inbox, with **Recently reviewed** to see and change your answers. The same questions appear inside each screenshot or Reel viewer. |
+| **Trips & memories** | Group places into trips and days. After a visit, add the date, your notes and your own photos from Photos (found by location or date). |
+| **Add Place** | Save a place you know without a screenshot: saved places are suggested first, then Apple Maps. |
+| **Library health** | Pins with no screenshot or Reel behind them (and nothing you added) are removed automatically. Duplicate places are detected, and every schema upgrade makes a backup first. |
+| **Backup & export** | One .zip with the library, photos and settings (never the API key), or export places as JSON / GeoJSON. |
+
+### Next up
+
+| Planned | Why |
+| --- | --- |
+| Signed & notarized download (Developer ID) | Open on any Mac without security warnings |
+| First-run DeepSeek key setup | Other people don't have a `.env.local` |
+| Tidy place kinds automatically | Some places named after a city are saved as "station" or "activity" |
+| Optional: neighbouring countries in city view | Show places just across a border when zooming out |
+| iPhone companion | Screenshots are mostly taken on the phone |
 
 ## Privacy and cost
 
@@ -61,7 +72,7 @@ screenshots.
 
 ```bash
 npm run build                       # type-check + frontend build
-cd src-tauri && cargo test          # Rust tests (pipelines, migrations, backup, pricing, warnings)
+cd src-tauri && cargo test          # 82 Rust tests: pipelines, migrations, backup, pricing, warnings, library rules
 ```
 
 ```text

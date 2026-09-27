@@ -4,11 +4,11 @@ import type { Place, PlaceCandidate } from "../api/types";
 import { CATEGORY, STATUS } from "../lib/labels";
 import { CategoryGlyph, colorOf } from "../lib/categoryIcons";
 
-export function Thumb({ path, alt = "", className = "", fallback }: { path?: string | null; alt?: string; className?: string; fallback?: ReactNode }) {
+export function Thumb({ path, alt = "", className = "", fallback, focus }: { path?: string | null; alt?: string; className?: string; fallback?: ReactNode; focus?: string | null }) {
   const src = fileUrl(path);
   const [failed, setFailed] = useState(false);
   if (!src || failed) return <div className={`thumb thumb-empty ${className}`}>{fallback ?? "🖼️"}</div>;
-  return <img className={`thumb ${className}`} src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
+  return <img className={`thumb ${className}`} src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} style={focus ? { objectPosition: focus } : undefined} />;
 }
 
 export function Pill({ tone = "muted", children, title }: { tone?: string; children: ReactNode; title?: string }) {

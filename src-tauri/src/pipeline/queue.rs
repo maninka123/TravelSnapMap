@@ -233,6 +233,8 @@ impl ProcessingQueue {
         if let Some(r) = &run_id {
             let _ = db.finish_run(r);
         }
+        // Screenshots re-read in this run no longer supporting a place: that pin goes.
+        let _ = db.remove_unsupported_places();
         let cancelled = self.cancel.load(Ordering::SeqCst);
         self.update(|s| {
             s.running = false;

@@ -50,9 +50,10 @@ export const ProcessingService = {
 export const PlaceService = {
   list: (filter: PlaceFilter = {}) => invoke<Place[]>("list_places", { filter }),
   detail: (id: string) => invoke<PlaceDetail>("get_place_detail", { id }),
-  update: (id: string, field: "canonicalName" | "category" | "personalStatus" | "notes" | "heroImageId" | "visitedAt" | "visitNotes" | "coverMemoryId", value: string | null) =>
+  update: (id: string, field: "canonicalName" | "category" | "personalStatus" | "notes" | "heroImageId" | "visitedAt" | "visitNotes" | "coverMemoryId" | "heroFocus", value: string | null) =>
     invoke<void>("update_place", { id, field, value }),
-  setLocation: (id: string, candidate: PlaceCandidate) => invoke<void>("set_place_location", { id, candidate }),
+  /** Returns the place to show: a different id means it was merged into a place you already had there. */
+  setLocation: (id: string, candidate: PlaceCandidate) => invoke<string>("set_place_location", { id, candidate }),
   remove: (id: string) => invoke<void>("delete_place", { id }),
   merge: (sourceId: string, targetId: string) => invoke<void>("merge_places", { sourceId, targetId }),
   split: (placeId: string, screenshotIds: string[], candidate: PlaceCandidate) =>
@@ -64,6 +65,14 @@ export const PlaceService = {
   addFact: (placeId: string, factType: string, text: string, screenshotId: string | null, reelId: string | null) =>
     invoke<string>("add_fact", { placeId, factType, text, screenshotId, reelId }),
   removeImage: (id: string) => invoke<void>("remove_image", { id }),
+  /** Your own photos: image files (any format macOS reads, incl. HEIC). */
+  addPhotos: (placeId: string, paths: string[]) => invoke<number>("add_place_photos", { placeId, paths }),
+  /** A pasted image's bytes. */
+  addPhotoBytes: (placeId: string, bytes: number[], ext: string) => invoke<string>("add_place_photo_bytes", { placeId, bytes, ext }),
+  updateCaption: (id: string, caption: string) => invoke<void>("update_image_caption", { id, caption }),
+  /** Use a screenshot or Reel (its photo, or its whole picture) as the place's cover. */
+  setCoverSource: (placeId: string, screenshotId: string | null, reelId: string | null) =>
+    invoke<string>("set_cover_source", { placeId, screenshotId, reelId }),
   summarize: (id: string) => invoke<string>("summarize_place", { id }),
   /** Map provider search — coordinates always come from here, never from AI. */
   searchMap: (query: string) => invoke<PlaceCandidate[]>("search_map", { query }),
@@ -103,6 +112,12 @@ export const ReviewService = {
   list: () => invoke<ReviewEntry[]>("list_reviews"),
   resolve: (id: string, action: string, candidate?: PlaceCandidate) =>
     invoke<void>("resolve_review", { id, action, candidate: candidate ?? null }),
+  /** Answered reviews, newest first. */
+  recent: () => invoke<ReviewEntry[]>("recent_reviews"),
+  /** Change an earlier answer: changePlace/isPlace (with a place) · travel · notTravel · merge · removePhoto · retry */
+  change: (id: string, action: string, candidate?: PlaceCandidate) => invoke<void>("change_review", { id, action, candidate: candidate ?? null }),
+  /** Everything to review (and already answered) for one screenshot or Reel. */
+  forSource: (screenshotId: string | null, reelId: string | null) => invoke<ReviewEntry[]>("source_reviews", { screenshotId, reelId }),
 };
 
 export const TripService = {

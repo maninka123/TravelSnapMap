@@ -4,6 +4,7 @@ import type { Place, Rect, ScreenshotDetail as Detail } from "../../api/types";
 import { CategoryChip, ErrorNote, Modal, PlaceLine, Pill, Thumb } from "../../components/common";
 import { AddFact, FactRow } from "../../components/FactsEditor";
 import { PlaceSearchDialog } from "../../components/PlacePicker";
+import { SourceReviews } from "../review/ReviewCards";
 import { PlaceService } from "../../api/services";
 import { formatDate, pct, PROCESSING, SOURCE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
@@ -44,6 +45,9 @@ export function ScreenshotDetail({ id, highlight }: { id: string; highlight?: st
         </div>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
+
+      {/* What's waiting to be reviewed for this screenshot (answer here), and your earlier answers. */}
+      <SourceReviews screenshotId={id} />
 
       <div className="shot-layout">
         <div className="stack">

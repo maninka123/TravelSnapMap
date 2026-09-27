@@ -67,12 +67,7 @@ impl Pipeline {
     }
 
     fn drop_if_orphan(&self, place_id: &str) -> Result<()> {
-        if let Some(p) = self.db.place(place_id)? {
-            if p.source_count == 0 && !p.is_user_verified && p.notes.is_empty() && p.personal_status == PersonalStatus::WantToVisit {
-                self.db.delete_place(place_id)?;
-            }
-        }
-        Ok(())
+        self.db.remove_if_unsupported(place_id)
     }
 
     /// Resolves a Review Inbox item. `action` depends on the kind:
@@ -101,6 +96,7 @@ impl Pipeline {
                 self.db.set_place_user_verified(&place_id)?;
                 self.db.link(&place_id, &sid, "", 1.0, DataOrigin::User)?;
                 self.db.resolve_review(review_id, "confirmed")?;
+                self.db.set_review_place(review_id, Some(&place_id))?;
             }
             (ReviewKind::PlaceResolution, "choose") => {
                 let cand = candidate.ok_or_else(|| anyhow!("no candidate chosen"))?;
@@ -113,8 +109,10 @@ impl Pipeline {
                         self.db.unlink(provisional, &sid)?;
                         self.drop_if_orphan(provisional)?;
                     }
+                    self.db.set_review_place(review_id, Some(&chosen))?;
                 } else {
-                    self.user_attach(&sid, &cand, extracted.as_ref())?;
+                    let chosen = self.user_attach(&sid, &cand, extracted.as_ref())?;
+                    self.db.set_review_place(review_id, Some(&chosen))?;
                 }
                 self.db.resolve_review(review_id, "chose place")?;
             }
@@ -159,6 +157,68 @@ impl Pipeline {
             (kind, action) => return Err(anyhow!("unsupported action {action} for {kind}")),
         }
         self.refresh_after_review(&sid)
+    }
+
+    /// Changes an earlier answer (Review → Recently reviewed).
+    /// changePlace / isPlace (with a candidate) · travel · notTravel · merge · removePhoto · retry
+    pub async fn change_review(&self, review_id: &str, action: &str, candidate: Option<PlaceCandidate>) -> Result<()> {
+        let review = self.db.review(review_id)?.ok_or_else(|| anyhow!("review item not found"))?;
+        let sid = review.screenshot_id.clone();
+        let reel = review.reel_id.clone();
+        match action {
+            "changePlace" | "isPlace" => {
+                let cand = candidate.ok_or_else(|| anyhow!("pick the place first"))?;
+                let old = review.resolved_place_id.clone().or(review.place_a_id.clone()).filter(|_| action == "changePlace");
+                let chosen = if let Some(reel_id) = reel.as_deref() {
+                    if let Some(old) = old.as_deref() {
+                        self.db.unlink_reel(old, reel_id)?;
+                        self.drop_if_orphan(old)?;
+                    }
+                    self.user_attach_reel(reel_id, &cand, None)?
+                } else {
+                    let sid = sid.clone().ok_or_else(|| anyhow!("no source"))?;
+                    let linked = old.as_deref().is_some_and(|o| self.db.places_for_screenshot(&sid).map(|ps| ps.iter().any(|p| p.id == o)).unwrap_or(false));
+                    if linked { self.correct_place(&sid, old.as_deref().unwrap(), &cand)? } else { self.user_attach(&sid, &cand, None)? }
+                };
+                self.db.resolve_review(review_id, "chose place")?;
+                self.db.set_review_place(review_id, Some(&chosen))?;
+            }
+            "travel" => {
+                let sid = sid.ok_or_else(|| anyhow!("no screenshot"))?;
+                self.db.set_user_classification(&sid, None)?;
+                self.confirm_travel(&sid).await?;
+                self.db.resolve_review(review_id, "travel")?;
+            }
+            "notTravel" => {
+                let sid = sid.ok_or_else(|| anyhow!("no screenshot"))?;
+                self.mark_not_travel(&sid)?;
+                self.db.resolve_review(review_id, "not travel")?;
+            }
+            "merge" => {
+                let (a, b) = (review.place_a_id.clone().unwrap_or_default(), review.place_b_id.clone().unwrap_or_default());
+                if self.db.place(&a)?.is_none() || self.db.place(&b)?.is_none() {
+                    anyhow::bail!("One of these places no longer exists.");
+                }
+                merge::merge_places(&self.db, &a, &b)?;
+                self.db.resolve_review(review_id, "merged")?;
+            }
+            "removePhoto" => {
+                if let Some(image_id) = &review.image_id {
+                    if let Some(img) = self.db.image(image_id)? {
+                        if let Some(p) = img.image_path { let _ = std::fs::remove_file(p); }
+                    }
+                    self.db.delete_image(image_id)?;
+                }
+                self.db.resolve_review(review_id, "rejected")?;
+            }
+            "retry" => {
+                self.db.resolve_review(review_id, "retried")?;
+                if let Some(reel_id) = reel.as_deref() { self.reprocess_reel(reel_id).await; }
+                else if let Some(sid) = sid.as_deref() { self.reprocess(sid).await?; }
+            }
+            other => anyhow::bail!("unknown change {other}"),
+        }
+        Ok(())
     }
 
     /// When the last open review for a screenshot is handled, it becomes complete.
@@ -219,6 +279,7 @@ impl Pipeline {
                 self.db.set_place_user_verified(&place_id)?;
                 self.db.link_reel(&place_id, reel_id, extracted.map(|e| e.display_name.as_str()).unwrap_or(""), 1.0, DataOrigin::User)?;
                 self.db.resolve_review(&review.id, "confirmed")?;
+                self.db.set_review_place(&review.id, Some(&place_id))?;
             }
             (ReviewKind::PlaceResolution, "choose") => {
                 let cand = candidate.ok_or_else(|| anyhow!("no candidate chosen"))?;
@@ -231,8 +292,10 @@ impl Pipeline {
                         self.db.unlink_reel(provisional, reel_id)?;
                         self.drop_if_orphan(provisional)?;
                     }
+                    self.db.set_review_place(&review.id, Some(&chosen))?;
                 } else {
-                    self.user_attach_reel(reel_id, &cand, extracted)?;
+                    let chosen = self.user_attach_reel(reel_id, &cand, extracted)?;
+                    self.db.set_review_place(&review.id, Some(&chosen))?;
                 }
                 self.db.resolve_review(&review.id, "chose place")?;
             }

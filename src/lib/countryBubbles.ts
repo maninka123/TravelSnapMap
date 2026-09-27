@@ -135,9 +135,14 @@ export async function ensureCountryImages(map: MLMap, aggs: CountryAggregate[], 
 // MARK: City / region bubbles (inside a picked country)
 
 /** Which city/region a place belongs to on the map (city, else region, else its own name). */
-export const areaKey = (p: Place) => p.city ?? p.region ?? p.canonicalName;
+export const areaKey = (p: Place) => p.metro ?? p.city ?? p.region ?? p.canonicalName;
 
-export interface AreaAggregate { key: string; count: number; lng: number; lat: number; summary: string; image: string; places: Place[] }
+/** How much is behind a place: its screenshots/Reels plus what you added (photos, memories, notes). */
+export function support(p: Place): number {
+  return p.sourceCount + (p.userPhotoCount ?? 0) + p.memoryCount + (p.notes.trim() ? 1 : 0) + (p.visitNotes?.trim() ? 1 : 0);
+}
+
+export interface AreaAggregate { key: string; weight: number; count: number; lng: number; lat: number; summary: string; image: string; places: Place[] }
 
 /** One bubble per city/region (including cities with a single place), so a country shows one kind of marker. */
 export function areaAggregates(places: Place[]): { areas: AreaAggregate[]; singles: Place[] } {
@@ -149,7 +154,7 @@ export function areaAggregates(places: Place[]): { areas: AreaAggregate[]; singl
     const counts: Partial<Record<CategoryGroup, number>> = {};
     ps.forEach((p) => { const g = groupOf(p.category); counts[g] = (counts[g] ?? 0) + 1; });
     areas.push({
-      key, count: ps.length, places: ps, summary: groupSummary(counts), image: `area-${hashKey(key)}-${ps.length}`,
+      key, count: ps.length, weight: ps.reduce((n, p) => n + support(p), 0), places: ps, summary: groupSummary(counts), image: `area-${hashKey(key)}-${ps.length}`,
       lng: ps.reduce((a, p) => a + p.longitude, 0) / ps.length,
       lat: ps.reduce((a, p) => a + p.latitude, 0) / ps.length,
     });
@@ -157,12 +162,36 @@ export function areaAggregates(places: Place[]): { areas: AreaAggregate[]; singl
   return { areas, singles };
 }
 
+/** The best-supported cities always get a full bubble. */
+export const MAJOR_CITIES = 8;
+/** Full city bubbles per country (no cap: every well-supported city or region is shown as one). */
+export const MAX_FULL_BUBBLES = Number.POSITIVE_INFINITY;
+/** A smaller city with this much support or less just shows its pins; more and it becomes a city bubble. */
+export const PIN_CITY_MAX = 2;
+
+/**
+ * Splits a country's cities by how much is behind them (screenshots, Reels, your photos/notes):
+ * well-supported cities → full named bubbles (e.g. Xi'an with 5 screenshots), lightly supported → their pins.
+ * (Xinjiang with 3 screenshots is a bubble too — well-supported cities and regions are never shrunk to dots.)
+ */
+export function rankAreas(areas: AreaAggregate[]) {
+  const ranked = [...areas].sort((a, b) => b.weight - a.weight || b.count - a.count || a.key.localeCompare(b.key));
+  const cities = ranked.filter((a, i) => i < MAJOR_CITIES || a.weight > PIN_CITY_MAX);
+  const full = cities.slice(0, MAX_FULL_BUBBLES);
+  return {
+    bubbles: cities,
+    major: new Set(full.map((a) => a.key)),
+    pinCities: new Set(ranked.filter((a) => !cities.includes(a)).map((a) => a.key)),
+  };
+}
+
 export function areaGeoJSON(areas: AreaAggregate[]): GeoJSON.FeatureCollection {
+  const { bubbles, major } = rankAreas(areas);
   return {
     type: "FeatureCollection",
-    features: areas.map((a) => ({
+    features: bubbles.map((a) => ({
       type: "Feature", geometry: { type: "Point", coordinates: [a.lng, a.lat] },
-      properties: { key: a.key, count: a.count, summary: a.summary, image: a.image },
+      properties: { key: a.key, count: a.count, summary: a.summary, image: a.image, major: major.has(a.key) },
     })),
   };
 }

@@ -216,6 +216,8 @@ string_enum!(RegionType, default = Unknown, {
 
 string_enum!(DataOrigin, default = Ai, {
     Ai => "ai", MapKit => "mapKit", Local => "local", User => "user",
+    // Added by hand with "+ Add Place": has no screenshots or Reels on purpose, so it's never auto-removed.
+    Manual => "manual",
 });
 
 string_enum!(Verification, default = Verified, {

@@ -59,6 +59,12 @@ export interface Place {
   visitNotes: string;
   coverMemoryId: string | null;
   memoryCount: number;
+  /** Photos you added yourself. */
+  userPhotoCount: number;
+  /** Where the cover photo is centred, e.g. "30% 60%" (set by dragging it). */
+  heroFocus: string | null;
+  /** The city it's grouped under (computed in the app: suburbs/districts → their city). */
+  metro?: string;
 }
 
 export interface Screenshot {
@@ -138,6 +144,10 @@ export interface PlaceImage {
   isAccepted: boolean;
   origin: DataOrigin;
   duplicateSourceIds: string[];
+  /** Your own details for this photo. */
+  caption: string;
+  reelId: string | null;
+  createdAt: string;
 }
 
 export interface Link {
@@ -182,6 +192,10 @@ export interface Review {
   placeBId: string | null;
   imageId: string | null;
   isResolved: boolean;
+  /** Your answer, e.g. "chose place", "not travel", "kept separate". */
+  resolution: string | null;
+  resolvedAt: string | null;
+  resolvedPlaceId: string | null;
   createdAt: string;
   screenshotThumbnail: string | null;
 }
@@ -191,6 +205,9 @@ export interface ReviewEntry {
   placeA: Place | null;
   placeB: Place | null;
   image: PlaceImage | null;
+  /** Answered reviews: the place you chose (if any). */
+  chosen?: Place | null;
+  sourceStatus?: string | null;
 }
 
 export interface Trip {

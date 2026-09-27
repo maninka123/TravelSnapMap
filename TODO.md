@@ -117,3 +117,13 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Map zoom levels: country flag bubbles (0–3) → clusters with per-kind hover summary (4–10) → individual pins (10+); picked city/small country shows every place; chooser for pins on the same spot
 - [x] Map hierarchy Country → City/Region → Place: country bubble → fit country → city/region bubbles (single places as pins) → city: small clusters → pins; small countries straight to pins; hover cards with kinds
 - [x] Map view switch: Smart · Countries · Cities · Places (remembered); clicking a city always shows all its pins, no bubbles
+
+## Milestone H — Map hierarchy, editing and review (v0.4)
+- [x] Map: Country → City → Place; suburbs/districts grouped under their real city; city bubbles by evidence; a city's own pin (named like the city) stands out; nearby pins in the same country when zooming out
+- [x] City names corrected (Chinese districts, native-script names, "Mawatha" etc.) with a backup first
+- [x] Review: Recently reviewed with your answers and a way to change them; review questions inside the screenshot/Reel viewer
+- [x] Photos & sources: one grid; your own photos by drag & drop, paste or file picker; photo details; cover from any card; drag the cover to reposition
+- [x] Correct location merges into an existing place at that spot
+- [x] Pins without any screenshot/Reel (and nothing you added) are removed automatically; places you add by hand always stay
+- [x] Library schema v5 (review answers, photo details) and v6 (cover position), each with a pre-migration backup
+- [x] Photos helper never shows a second Dock icon; processing bar shows whole-library progress with Continue on launch

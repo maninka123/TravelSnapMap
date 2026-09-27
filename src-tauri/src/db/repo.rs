@@ -329,7 +329,7 @@ impl Database {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)",
             params![id, cand.name, serde_json::to_string(alt_names).unwrap(), cand.map_identifier, cand.latitude, cand.longitude,
                     cand.address, cand.city, cand.region, cand.country, cand.country_code, category, verification, origin,
-                    origin == DataOrigin::User, ts],
+                    matches!(origin, DataOrigin::User | DataOrigin::Manual), ts],
         ))?;
         Ok(self.place(&id)?.expect("inserted place"))
     }
@@ -416,6 +416,7 @@ impl Database {
             "visitedAt" => "visited_at",
             "visitNotes" => "visit_notes",
             "coverMemoryId" => "cover_memory_id",
+            "heroFocus" => "hero_focus",
             "verification" => "verification",
             _ => anyhow::bail!("unknown place field {field}"),
         };
@@ -658,8 +659,29 @@ impl Database {
     }
 
     pub fn resolve_review(&self, id: &str, resolution: &str) -> Result<()> {
-        self.with(|c| c.execute("UPDATE review_items SET is_resolved = 1, resolution = ?2 WHERE id = ?1", params![id, resolution]))?;
+        self.with(|c| c.execute(
+            "UPDATE review_items SET is_resolved = 1, resolution = ?2, resolved_at = ?3 WHERE id = ?1",
+            params![id, resolution, now()],
+        ))?;
         Ok(())
+    }
+
+    /// Remembers which place an answer chose, so it can be changed later.
+    pub fn set_review_place(&self, id: &str, place_id: Option<&str>) -> Result<()> {
+        self.with(|c| c.execute("UPDATE review_items SET resolved_place_id = ?2 WHERE id = ?1", params![id, place_id]))?;
+        Ok(())
+    }
+
+    /// Answered reviews, newest answer first (for "Recently reviewed").
+    pub fn recent_reviews(&self, limit: i64) -> Result<Vec<ReviewRecord>> {
+        self.with(|c| {
+            let mut stmt = c.prepare(&format!(
+                "SELECT {REVIEW_COLUMNS} FROM review_items r LEFT JOIN screenshots s ON s.id = r.screenshot_id LEFT JOIN reels rl ON rl.id = r.reel_id \
+                 WHERE r.is_resolved = 1 ORDER BY COALESCE(r.resolved_at, r.created_at) DESC LIMIT ?1"
+            ))?;
+            let rows = stmt.query_map([limit], ReviewRecord::from_row)?;
+            rows.collect()
+        })
     }
 
     pub fn open_review_count(&self) -> Result<i64> {
