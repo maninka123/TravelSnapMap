@@ -525,14 +525,51 @@ pub async fn reel_tool_status(state: State<'_, AppState>) -> CmdResult<Value> {
     Ok(json!({ "ytDlp": path.map(|p| p.to_string_lossy().to_string()) }))
 }
 
-/// Opens an http(s) link in the default browser.
+/// The only non-web link the app opens: the Photos pane of macOS System Settings (when access was denied).
+const PHOTOS_PRIVACY_SETTINGS: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos";
+
+/// Opens an http(s) link in the default browser (or the Photos privacy settings). Anything else is refused, so a link
+/// that came from imported text can never launch an app or open a local file.
 #[tauri::command]
 pub async fn open_external(url: String) -> CmdResult<()> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
+    if !is_openable_link(&url) {
         return Err("Only web links can be opened".into());
     }
     open_with_system(url.as_ref()).map_err(err)?;
     Ok(())
+}
+
+pub(crate) fn is_openable_link(url: &str) -> bool {
+    if url == PHOTOS_PRIVACY_SETTINGS {
+        return true;
+    }
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
+    // A host must follow, and nothing that a shell or `open` could misread (spaces, control characters).
+    rest.is_some_and(|r| !r.is_empty() && !r.starts_with('/') && !url.chars().any(|c| c.is_whitespace() || c.is_control()))
+}
+
+/// Undoes a staged restore (before the app restarts).
+#[tauri::command]
+pub async fn cancel_restore(state: State<'_, AppState>) -> CmdResult<()> {
+    let pending = state.pipeline.data_dir.join(crate::backup::PENDING_RESTORE);
+    if pending.exists() {
+        std::fs::remove_dir_all(pending).map_err(err)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod link_tests {
+    #[test]
+    fn only_web_links_and_the_photos_settings_pane_open() {
+        for ok in ["https://maps.apple.com/?ll=1,2&q=Kyoto", "http://example.com", super::PHOTOS_PRIVACY_SETTINGS] {
+            assert!(super::is_openable_link(ok), "{ok}");
+        }
+        for bad in ["file:///etc/passwd", "/Applications/Calculator.app", "https://", "https:///x", "javascript:alert(1)",
+                    "x-apple.systempreferences:com.apple.preference.security", "https://a.com\n--args", "ssh://host", "HTTPS://upper.case"] {
+            assert!(!super::is_openable_link(bad), "{bad}");
+        }
+    }
 }
 
 /// Re-transcribe a Reel with a chosen language ("auto" to detect again) and update its places.

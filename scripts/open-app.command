@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Double-click to open TravelSnapMap. Builds the app first if it's missing or the code changed.
-cd "$(dirname "$0")"
+# Double-click to open TravelSnapMap (builds it first if needed). Lives in scripts/; works from the project root.
+cd "$(dirname "$0")/.."
 [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 

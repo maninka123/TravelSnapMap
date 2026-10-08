@@ -68,11 +68,11 @@ export function BackupCard() {
         </div>
       </section>
       {staged && (
-        <Modal title="Restore this backup?" onClose={() => setStaged(undefined)}>
+        <Modal title="Restore this backup?" onClose={async () => { await action.run(() => BackupService.cancelRestore()); setStaged(undefined); }}>
           <p>The backup contains {plural(staged.places, "place")}, {plural(staged.screenshots, "screenshot")}, {plural(staged.reels, "Reel")} and {plural(staged.trips, "trip")}.</p>
-          <p className="muted small">TravelSnapMap restarts to switch libraries. Your current library is moved to the “backups” folder, so nothing is lost. If you close this instead, the backup is restored the next time the app starts.</p>
+          <p className="muted small">TravelSnapMap restarts to switch libraries. Your current library is moved to the “backups” folder, so nothing is lost.</p>
           <div className="modal-actions">
-            <button className="btn" onClick={() => setStaged(undefined)}>Later</button>
+            <button className="btn" onClick={async () => { await action.run(() => BackupService.cancelRestore()); setStaged(undefined); }}>Cancel</button>
             <button className="btn primary" onClick={() => void BackupService.restart()}>Restart and restore</button>
           </div>
         </Modal>

@@ -196,6 +196,7 @@ export const BackupService = {
   exportPlaces: (path: string, format: "json" | "geojson") => invoke<number>("export_places", { path, format }),
   /** Checks a backup and stages it; it replaces the library after a restart (the current one is kept). */
   restore: (path: string) => invoke<RestorePreview>("restore_backup", { path }),
+  cancelRestore: () => invoke<void>("cancel_restore"),
   restart: () => invoke<void>("restart_app"),
   revealDataFolder: () => invoke<void>("reveal_data_folder"),
 };

@@ -9,39 +9,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    # macOS is required: the Swift helper links PhotoKit, Vision, Speech and MapKit (macOS 26 SDK).
-    # No real Photos, DeepSeek, MapKit, Instagram or permissions are used — live tests are #[ignore]d.
-    runs-on: macos-26
-    timeout-minutes: 45
+  frontend:
+    # Type-check, UI tests (against the in-memory demo backend) and the production build. Fast; any OS works.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: UI tests
+        run: npm test
+      - name: Production build
+        run: npm run build
 
+  macos:
+    # The Swift helper links PhotoKit, Vision, Speech and MapKit, so the app and its tests build on macOS.
+    # No real Photos, DeepSeek, MapKit or Instagram are used — live tests are #[ignore]d.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
       - name: Use the runner's Xcode toolchain
         run: |
           echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
           xcrun --show-sdk-version
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      - name: npm ci
-        run: npm ci
-
-      - name: Type-check
-        run: npm run typecheck
-
-      - name: Production frontend build
-        run: npm run build
-
-      - name: Rust tests (builds the Swift helper too)
+      - run: npm ci
+      - name: Rust tests, migrations and accuracy gates (builds the Swift helper too)
         working-directory: src-tauri
-        run: cargo test --locked
+        run: cargo test --locked -- --nocapture
+      - name: Build the app bundle (unsigned)
+        run: npm run tauri build -- --bundles app

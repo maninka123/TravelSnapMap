@@ -14,6 +14,8 @@ mod text;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod eval;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -297,6 +299,7 @@ pub fn run() {
             commands::restore_backup,
             commands::restart_app,
             commands::reveal_data_folder,
+            commands::cancel_restore,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TravelSnapMap");

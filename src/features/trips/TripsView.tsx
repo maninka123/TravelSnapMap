@@ -103,10 +103,10 @@ function TripDetail({ trip, onBack }: { trip: Trip; onBack: () => void }) {
   const nav = useNav();
   const toast = useToast();
   const action = useAction();
-  const { data: loaded = [] } = useLoad(() => TripService.entries(trip.id), [trip.id]);
+  const { data: loaded } = useLoad(() => TripService.entries(trip.id), [trip.id]);
   const { data: allWarnings = {} } = useLoad(() => PlaceService.warnings(), []);
   const [order, setOrder] = useState<TripEntry[]>([]);
-  useEffect(() => setOrder(withMetroEntries(loaded)), [loaded]);
+  useEffect(() => { if (loaded) setOrder(withMetroEntries(loaded)); }, [loaded]);
   const [extraDays, setExtraDays] = useState(0);
   const [adding, setAdding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);

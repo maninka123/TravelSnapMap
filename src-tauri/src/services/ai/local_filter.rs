@@ -34,7 +34,8 @@ const STRONG: &[&str] = &[
     "save this for", "places to visit", "where to stay", "check-in", "check-out", "per night", "book now",
     "opening hours", "open now", "admission", "entry fee", "tickets", "directions", "viewpoint",
     "national park", "hotel", "hostel", "ryokan", "resort", "airbnb", "tripadvisor", "booking.com", "flight",
-    "boarding", "departure", "arrival",
+    "boarding", "departure", "arrival", "where to eat", "what to eat", "where to go", "how to get there", "worth visiting",
+    "day trip", "walking tour", "coastal walk", "city walls",
 ];
 const KEYWORDS: &[&str] = &[
     "travel", "trip", "visit", "vacation", "holiday", "tour", "restaurant", "cafe", "café", "bar", "brunch",
@@ -46,11 +47,12 @@ const KEYWORDS: &[&str] = &[
     "valley", "canyon", "gorge", "cave", "falls", "peak", "glacier", "river", "bay", "harbour", "harbor", "pagoda",
     "village", "province", "scenic", "sightseeing", "attraction", "landmark", "tower", "bridge", "temple", "fort",
     "foodie", "foodies", "cuisine", "dessert", "bakery", "buffet", "villa", "camping", "road trip",
+    "walk", "coastal", "entry", "ruins", "bus", "metro", "subway", "night market", "old city", "lookout", "swim", "snorkel",
 ];
 /// Matched anywhere (also inside handles like @asiaodysseytravel) and in other scripts.
 const SUBSTRING_KEYWORDS: &[&str] = &[
     "travel", "wanderlust", "itinerar", "backpack", "tourism",
-    "旅游", "旅行", "景区", "景点", "攻略", "酒店", "餐厅", "美食", "打卡", "観光", "ホテル", "温泉", "여행", "관광", "맛집", "호텔",
+    "旅游", "旅行", "景区", "景点", "攻略", "酒店", "餐厅", "美食", "打卡", "夜景", "地铁", "门票", "古镇", "公园", "観光", "ホテル", "温泉", "여행", "관광", "맛집", "호텔",
 ];
 const NEGATIVE: &[&str] = &[
     "func ", "import ", "error:", "warning:", "xcode", "terminal", "npm ", "git ", "stack trace", "exception",

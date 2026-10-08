@@ -63,7 +63,7 @@ export function installDemoBackend(options: DemoOptions = {}): DemoBackend {
 const MUTATIONS = new Set([
   "update_place", "set_place_location", "delete_place", "merge_places", "add_manual_place", "create_trip", "update_trip", "delete_trip",
   "add_to_trip", "update_trip_entry", "remove_trip_entry", "resolve_review", "change_review", "screenshot_action", "reel_action",
-  "import_reels", "save_settings", "save_api_key", "delete_fact", "update_fact", "add_fact", "remove_place_screenshot",
+  "import_reels", "save_settings", "reorder_trip", "import_screenshot_files", "save_api_key", "delete_fact", "update_fact", "add_fact", "remove_place_screenshot",
 ]);
 
 function emptyLibrary(): DemoLibrary {
@@ -231,6 +231,14 @@ function handle(s: DemoBackend, cmd: string, a: Record<string, any>): unknown {
     case "get_settings": return { config: s.settings.config, defaults: DEFAULT_CONFIG, hasApiKey: s.settings.hasApiKey, apiKeySource: s.settings.hasApiKey ? "macOS Keychain" : "" };
     case "save_settings": s.settings.config = a.config; return null;
     case "save_api_key": s.settings.hasApiKey = !!a.key; return null;
+    case "restore_backup": return { places: 12, screenshots: 40, reels: 2, trips: 1, schemaVersion: 7 };
+    case "cancel_restore": case "restart_app": case "reveal_data_folder": return null;
+    case "import_screenshot_files": return { added: (a.paths ?? []).length, alreadyImported: 0, skipped: 0, queuedBehindScan: false };
+    case "reorder_trip": {
+      (a.order as { id: string; day: number | null }[]).forEach((o, i) => { const t = lib.tripPlaces.find((x) => x.id === o.id); if (t) { t.day = o.day; t.position = i; } });
+      return null;
+    }
+    case "export_trip": return null;
     case "backup_library": return { path: a.path, sizeBytes: 18_400_000, places: lib.places.length, screenshots: lib.screenshots.length, reels: lib.reels.length, files: 210 };
     case "export_places": return lib.places.length;
 

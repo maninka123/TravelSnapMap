@@ -1,4 +1,4 @@
-# TravelSnapMap — build progress
+# TravelSnapMap — development log
 
 Ticked items are done and verified (tests pass / smoke-tested). Unticked items are in progress or planned.
 
@@ -127,3 +127,14 @@ Ticked items are done and verified (tests pass / smoke-tested). Unticked items a
 - [x] Pins without any screenshot/Reel (and nothing you added) are removed automatically; places you add by hand always stay
 - [x] Library schema v5 (review answers, photo details) and v6 (cover position), each with a pre-migration backup
 - [x] Photos helper never shows a second Dock icon; processing bar shows whole-library progress with Continue on launch
+
+## Milestone I — Production upgrade (v0.5.0)
+- [x] Navigation: Explore (map + library), Import (add, review, sources), My Trips; Settings secondary
+- [x] Design system (tokens, light/dark/forced theme, icons, Radix dialogs/menus), onboarding, toasts
+- [x] Corrections survive re-processing (source decisions, place aliases); answered reviews kept — schema v7
+- [x] Drop-to-import (content-hash dedupe), trip reorder + Markdown export, backup restore (staged, never deletes)
+- [x] UI tests (Vitest, demo backend); accuracy gates on labelled data (docs/EVALUATION.md)
+- [x] Release workflow (DMG, signing/notarization when secrets exist), entitlements, version 0.5.0
+- [ ] Signed + notarized release (needs Apple Developer ID secrets)
+- [ ] Held-out labelled set of real screenshots; DeepSeek extraction accuracy
+- [ ] Automatic updates (needs signed releases + updater key)

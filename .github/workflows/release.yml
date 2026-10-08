@@ -1,0 +1,75 @@
+name: Release
+
+# Builds the macOS app and DMG for a version tag (v0.5.0 …) and attaches them to a draft GitHub release.
+# Signing and notarization run only when the Apple secrets below are set; otherwise the build is unsigned and the
+# release notes say so. Never claim notarization for an unsigned build.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}                   # base64 .p12 (Developer ID Application)
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}         # "Developer ID Application: Name (TEAMID)"
+      APPLE_ID: ${{ secrets.APPLE_ID }}                                     # notarization (Apple ID + app-specific password)
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use the runner's Xcode toolchain
+        run: echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Tests before release
+        run: |
+          npm run typecheck
+          npm test
+          (cd src-tauri && cargo test --locked)
+      - name: Decide signing
+        id: sign
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            # Tauri signs when these are set; make sure empty values don't trigger a half-configured attempt.
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "APPLE_ID=" >> "$GITHUB_ENV"
+            echo "::warning::Apple signing secrets are not set: building an UNSIGNED, NOT NOTARIZED app (ad-hoc signature)."
+          fi
+      - name: Build app and DMG
+        run: npm run tauri build -- --target aarch64-apple-darwin --bundles app,dmg
+      - name: Verify signature
+        run: |
+          APP=$(ls -d src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app)
+          codesign --verify --deep --strict --verbose=2 "$APP" || true
+          if [ "${{ steps.sign.outputs.signed }}" = "true" ]; then
+            spctl --assess --type execute --verbose "$APP"
+            xcrun stapler validate "$APP"
+          fi
+      - name: Draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          body: |
+            ${{ steps.sign.outputs.signed == 'true' && 'Signed with Developer ID and notarized by Apple.' || '⚠️ Unsigned build (no Apple Developer ID configured). macOS will warn on first open: right-click the app → Open. Not notarized.' }}
+
+            See docs/RELEASE_NOTES.md for what's new and docs/INSTALL.md for installation and troubleshooting.
