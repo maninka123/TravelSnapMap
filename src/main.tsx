@@ -2,7 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "flag-icons/css/flag-icons.min.css";
-import "./styles.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/layout.css";
+import "./styles/features.css";
 
 async function start() {
   // `npm run demo`: the UI in a normal browser with a sample library (design work, screenshots). Compiled out of real builds.

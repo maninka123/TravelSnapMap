@@ -1,6 +1,31 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-export type View = "map" | "places" | "screenshots" | "review" | "trips" | "settings";
+/** Main destinations: Explore (map + library), Import (add, review, sources), My Trips; Settings is secondary. */
+export type View = "explore" | "import" | "trips" | "settings";
+export type ExploreMode = "map" | "library";
+export type ImportTab = "add" | "review" | "library";
+export type SettingsSection = "general" | "ai" | "privacy" | "sources" | "costs" | "backup" | "diagnostics" | "about";
+/** Where to go inside a destination. */
+export type Sub = { explore?: ExploreMode; import?: ImportTab; settings?: SettingsSection; focusPlaceId?: string; tripId?: string };
+
+const VIEW_KEY = "app.view";
+function initialView(): View {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === "explore" || v === "import" || v === "trips" || v === "settings") return v;
+  } catch { /* storage unavailable */ }
+  return "explore";
+}
+function remember(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* per-device convenience only */ }
+}
+function recall<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const v = localStorage.getItem(key) as T | null;
+    if (v && allowed.includes(v)) return v;
+  } catch { /* storage unavailable */ }
+  return fallback;
+}
 
 /** The list a screenshot/Reel was opened from, so the viewer can step to the next one. */
 export type SourceRef = { type: "screenshot" | "reel" | "place"; id: string };
@@ -13,7 +38,19 @@ export type Panel =
 interface Nav {
   view: View;
   panels: Panel[];
-  go: (view: View) => void;
+  exploreMode: ExploreMode;
+  importTab: ImportTab;
+  settingsSection: SettingsSection;
+  /** A place to select and show on the map once (e.g. "Show on map"); cleared by Explore. */
+  focusPlaceId?: string;
+  /** A trip to open in My Trips. */
+  tripId?: string;
+  go: (view: View, sub?: Sub) => void;
+  setExploreMode: (m: ExploreMode) => void;
+  setImportTab: (t: ImportTab) => void;
+  setSettingsSection: (s: SettingsSection) => void;
+  clearFocus: () => void;
+  setTripId: (id: string | undefined) => void;
   openPlace: (id: string, list?: SourceRef[]) => void;
   openScreenshot: (id: string, highlight?: string[], list?: SourceRef[]) => void;
   openReel: (id: string, seek?: number, list?: SourceRef[]) => void;
@@ -31,17 +68,42 @@ interface Nav {
 const NavContext = createContext<Nav | null>(null);
 
 export function NavProvider({ children }: { children: ReactNode }) {
-  const [view, setView] = useState<View>("map");
+  const [view, setView] = useState<View>(initialView);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [revision, setRevision] = useState(0);
+  const [exploreMode, setExploreModeState] = useState<ExploreMode>(() => recall("explore.mode", ["map", "library"] as const, "map"));
+  const [importTab, setImportTab] = useState<ImportTab>("add");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [focusPlaceId, setFocusPlaceId] = useState<string>();
+  const [tripId, setTripId] = useState<string>();
 
   const refresh = useCallback(() => setRevision((r) => r + 1), []);
+  const setExploreMode = useCallback((m: ExploreMode) => { setExploreModeState(m); remember("explore.mode", m); }, []);
   const value = useMemo<Nav>(() => ({
     view,
     panels,
     revision,
     refresh,
-    go: (v) => { setView(v); setPanels([]); },
+    exploreMode,
+    importTab,
+    settingsSection,
+    focusPlaceId,
+    tripId,
+    setExploreMode,
+    setImportTab,
+    setSettingsSection,
+    clearFocus: () => setFocusPlaceId(undefined),
+    setTripId,
+    go: (v, sub) => {
+      setView(v);
+      remember(VIEW_KEY, v);
+      setPanels([]);
+      if (sub?.explore) setExploreMode(sub.explore);
+      if (sub?.import) setImportTab(sub.import);
+      if (sub?.settings) setSettingsSection(sub.settings);
+      if (sub?.focusPlaceId) setFocusPlaceId(sub.focusPlaceId);
+      if (v === "trips") setTripId(sub?.tripId);
+    },
     openPlace: (id, list) => setPanels((p) => [...p, { type: "place", id, list }]),
     openScreenshot: (id, highlight, list) => setPanels((p) => [...p, { type: "screenshot", id, highlight, list }]),
     openReel: (id, seek, list) => setPanels((p) => [...p, { type: "reel", id, seek, list }]),
@@ -64,7 +126,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
     },
     back: () => setPanels((p) => p.slice(0, -1)),
     closePanels: () => setPanels([]),
-  }), [view, panels, revision, refresh]);
+  }), [view, panels, revision, refresh, exploreMode, importTab, settingsSection, focusPlaceId, tripId, setExploreMode]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

@@ -1,37 +1,9 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { ProcessingService } from "../api/services";
 import type { QueueSnapshot, RunReport } from "../api/types";
 import { formatDate, pct, PROCESSING, SOURCE } from "../lib/labels";
-import { useAction, useLoad, useNav } from "../lib/nav";
+import { useAction, useNav } from "../lib/nav";
 import { ErrorNote, Modal, Pill, Thumb } from "./common";
-
-/** Main screenshot actions: Scan New Screenshots and Import Folder… (test runs live in Settings → Diagnostics). */
-export function ScanControls() {
-  const { data: preview, reload } = useLoad(() => ProcessingService.scanPreview(), []);
-  const action = useAction();
-  const newCount = (preview?.photos.new ?? 0) + (preview?.folders ?? []).reduce((n, f) => n + (f.summary.new ?? 0), 0);
-
-  const importFolder = async () => {
-    const dir = await open({ directory: true, multiple: false, title: "Choose a folder of screenshots" });
-    if (typeof dir === "string") {
-      await action.run(() => ProcessingService.addFolder(dir));
-      reload();
-    }
-  };
-
-  return (
-    <>
-      <button className="btn primary" disabled={action.busy} onClick={() => action.run(() => ProcessingService.start({ kind: "scanNew" }))}
-              title="Only screenshots not already in TravelSnapMap (Photos + your folders)">
-        📸 Scan New Screenshots{preview ? ` (${newCount.toLocaleString()} new)` : ""}
-      </button>
-      <button className="btn" onClick={importFolder} title="Screenshots from any device: choose a folder of PNG/JPG/HEIC images">📁 Import Folder…</button>
-      {preview?.photos.error && <span className="muted small" title={preview.photos.error}>Photos: not available</span>}
-      <ErrorNote error={action.error} onClose={action.clearError} />
-    </>
-  );
-}
 
 /** Process a small number of real screenshots and show how the pipeline did. */
 export function TestRunDialog({ onClose }: { onClose: () => void }) {

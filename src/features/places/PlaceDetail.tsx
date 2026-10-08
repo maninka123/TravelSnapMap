@@ -1,13 +1,19 @@
 import maplibregl from "maplibre-gl";
+import {
+  AlertTriangle, ArrowLeftRight, BadgeCheck, Clapperboard, CopyPlus, Crosshair, ExternalLink, History, Luggage, Map as MapIcon, MoreHorizontal,
+  Navigation, Plus, Scissors, Search, Smartphone, Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PlaceService, ReelService, ScreenshotService, TripService } from "../../api/services";
 import type { Fact, Place, PlaceDetail as Detail, PlaceWarning } from "../../api/types";
 import { ErrorNote, Modal, PlaceLine, Pill, Thumb } from "../../components/common";
+import { Menu, MenuItem, MenuSeparator } from "../../components/ui";
+import { FACT_ICON, INFO_CARD_ICON, StatusIcon } from "../../lib/icons";
 import { AddFact, FactRow } from "../../components/FactsEditor";
 import { PlaceSearchDialog } from "../../components/PlacePicker";
 import { CategoryPicker } from "../../components/CategoryPicker";
 import { colorOf } from "../../lib/categoryIcons";
-import { FACT, formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
+import { formatDate, formatKm, formatTime, INFO_CARDS, SOURCE, SOURCE_KIND, STATUS, TIME_SENSITIVE } from "../../lib/labels";
 import { CategoryBadge } from "../../lib/categoryIcons";
 import { useAction, useLoad, useNav } from "../../lib/nav";
 import { quietBasemap } from "../map/MapView";
@@ -45,58 +51,74 @@ export function PlaceDetail({ id }: { id: string }) {
 
       <div className="detail-head">
         <EditableName place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "canonicalName", v))} />
-        <PlaceLine place={place} />
-        {place.alternativeNames.length > 0 && <span className="muted small">Also: {place.alternativeNames.join(" · ")}</span>}
-        <div className="row wrap">
-          <select value={place.personalStatus} onChange={(e) => action.run(() => PlaceService.update(place.id, "personalStatus", e.target.value))}>
-            {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.emoji} {s.label}</option>)}
-          </select>
+        <div className="row wrap" style={{ gap: 10 }}>
+          <PlaceLine place={place} />
+          {place.verification === "needsReview" ? <Pill tone="warn">Location not confirmed</Pill>
+            : place.isUserVerified ? <span className="verify-badge ok-text"><BadgeCheck size={14} /> Checked by you</span>
+            : <span className="verify-badge muted" title="Located with Apple Maps"><BadgeCheck size={14} /> Apple Maps match</span>}
+        </div>
+        {place.alternativeNames.length > 0 && <span className="muted small">Also known as {place.alternativeNames.join(" · ")}</span>}
+        <div className="detail-actions">
+          <label className={`status-tag status-${place.personalStatus}`} style={{ paddingRight: 2, fontSize: 13 }}>
+            <StatusIcon status={place.personalStatus} size={13} />
+            <select className="status-select" aria-label="Status" value={place.personalStatus} style={{ background: "transparent", color: "inherit" }}
+                    onChange={(e) => action.run(() => PlaceService.update(place.id, "personalStatus", e.target.value))}>
+              {Object.entries(STATUS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
+            </select>
+          </label>
           <CategoryPicker value={place.category} onChange={(c) => c && action.run(() => PlaceService.update(place.id, "category", c))} />
-          {place.verification === "needsReview" && <Pill tone="warn">Location not confirmed</Pill>}
-          {place.isUserVerified && <Pill tone="ok">Verified by you</Pill>}
           <span className="spacer" />
-          <button className="btn" onClick={() => setDialog("trip")}>✈️ Add to trip</button>
-          <button className="btn" title="Open in Apple Maps"
-                  onClick={() => openUrl(`https://maps.apple.com/?ll=${place.latitude},${place.longitude}&q=${encodeURIComponent(place.canonicalName)}`)}>🧭 Apple Maps</button>
-          <details className="menu">
-            <summary className="btn">More ▾</summary>
-            <div className="menu-items card">
-              <button className="btn ghost" onClick={() => setDialog("location")}>Correct location</button>
-              <button className="btn ghost" onClick={() => setDialog("merge")}>Merge into another place…</button>
-              <button className="btn ghost" disabled={data.screenshots.length + data.reels.length < 2} onClick={() => setDialog("split")}>Split sources into a new place…</button>
-              <button className="btn ghost danger" onClick={() => setDialog("remove")}>Remove pin…</button>
-            </div>
-          </details>
+          <button className="btn" onClick={() => setDialog("trip")}><Luggage size={14} /> Add to trip</button>
+          <button className="btn" onClick={() => nav.go("explore", { explore: "map", focusPlaceId: place.id })}><MapIcon size={14} /> Show on map</button>
+          <Menu trigger={<button className="btn icon-only" aria-label="More actions"><MoreHorizontal size={16} /></button>}>
+            <MenuItem icon={<Navigation size={14} />} onSelect={() => openUrl(`https://maps.apple.com/?ll=${place.latitude},${place.longitude}&q=${encodeURIComponent(place.canonicalName)}`)}>Open in Apple Maps</MenuItem>
+            <MenuSeparator />
+            <MenuItem icon={<Crosshair size={14} />} onSelect={() => setDialog("location")}>Correct location…</MenuItem>
+            <MenuItem icon={<CopyPlus size={14} />} onSelect={() => setDialog("merge")}>Merge into another place…</MenuItem>
+            <MenuItem icon={<Scissors size={14} />} disabled={data.screenshots.length + data.reels.length < 2} onSelect={() => setDialog("split")}>Split sources into a new place…</MenuItem>
+            <MenuSeparator />
+            <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setDialog("remove")}>Remove pin…</MenuItem>
+          </Menu>
         </div>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
 
-      <Warnings warnings={data.warnings} />
+      <div className="place-layout">
+        <div>
+          <Warnings warnings={data.warnings} />
+          <WhySaved detail={data} />
 
-      <MiniMap place={place} />
+          <div className="section"><h3>Saved information</h3><AddFact places={[place]} /></div>
+          <p className="disclaimer" style={{ marginBottom: 12 }}>From your screenshots and Reels — it may be out of date. Nothing here comes from an outside database, and different advice is kept side by side.</p>
+          <InfoCards facts={data.facts} nearby={data.nearby} warned={new Set(data.warnings.flatMap((w) => w.factIds))} />
 
-      <WhySaved detail={data} />
+          <PlacePhotos place={place} images={data.images} screenshots={data.screenshots} reels={data.reels}
+            onNotTravel={(kind, sid) => void notTravel(() => (kind === "reel" ? ReelService.action(sid, "markNotTravel") : ScreenshotService.action(sid, "markNotTravel")))} />
 
-      <div className="section"><h3>My visit</h3>{place.visitedAt && <span className="muted small">{formatDate(place.visitedAt)}</span>}</div>
-      <MyVisit place={place} memories={data.memories} />
-
-      <div className="section"><h3>Saved information</h3></div>
-      <div className="disclaimer">Saved from your screenshots and Reels — it may be out of date, and nothing here comes from an external database.</div>
-      <div className="add-fact-bar"><AddFact places={[place]} /></div>
-      <InfoCards facts={data.facts} nearby={data.nearby} warned={new Set(data.warnings.flatMap((w) => w.factIds))} />
-
-      <PlacePhotos place={place} images={data.images} screenshots={data.screenshots} reels={data.reels}
-        onNotTravel={(kind, sid) => void notTravel(() => (kind === "reel" ? ReelService.action(sid, "markNotTravel") : ScreenshotService.action(sid, "markNotTravel")))} />
-
-      {data.trips.length > 0 && (
-        <>
-          <div className="section"><h3>In trips</h3></div>
-          <div className="row wrap">{data.trips.map((t) => <span key={t.id} className="chip-btn">✈️ {t.name}</span>)}</div>
-        </>
-      )}
-
-      <div className="section"><h3>Your notes</h3></div>
-      <Notes place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "notes", v))} />
+          <div className="section"><h3>My visit</h3>{place.visitedAt && <span className="muted small">{formatDate(place.visitedAt)}</span>}</div>
+          <MyVisit place={place} memories={data.memories} />
+        </div>
+        <aside className="place-side">
+          <MiniMap place={place} />
+          <div className="side-card">
+            <h5>Your notes</h5>
+            <Notes place={place} onSave={(v) => action.run(() => PlaceService.update(place.id, "notes", v))} />
+          </div>
+          {data.trips.length > 0 && (
+            <div className="side-card">
+              <h5>In trips</h5>
+              <div className="row wrap" style={{ gap: 6 }}>{data.trips.map((t) => (
+                <button key={t.id} className="chip-btn" onClick={() => nav.go("trips", { tripId: t.id })}><Luggage size={12} /> {t.name}</button>
+              ))}</div>
+            </div>
+          )}
+          <div className="side-card">
+            <h5>Sources</h5>
+            <span className="small">{data.screenshots.length} screenshot{data.screenshots.length === 1 ? "" : "s"} · {data.reels.length} Reel{data.reels.length === 1 ? "" : "s"}</span>
+            <span className="muted small">Saved {formatDate(place.createdAt)}</span>
+          </div>
+        </aside>
+      </div>
 
       {dialog === "location" && (
         <PlaceSearchDialog title="Correct location" includeSaved={false} initialQuery={[place.canonicalName, place.city, place.country].filter(Boolean).join(", ")}
@@ -121,10 +143,10 @@ function Warnings({ warnings }: { warnings: PlaceWarning[] }) {
   if (warnings.length === 0) return null;
   return (
     <div className="warnings-panel">
-      <div className="warnings-head">⚠️ Before you go <span className="muted small">— check these, your saved info may be out of date</span></div>
+      <div className="warnings-head"><AlertTriangle size={15} /> Before you go <span className="muted small" style={{ fontWeight: 400 }}>— your saved info may be out of date</span></div>
       {warnings.map((w, i) => (
         <div key={i} className={`warning-row warning-${w.kind}`}>
-          <span className="warning-icon">{w.kind === "stale" ? "🕰️" : "↔️"}</span>
+          {w.kind === "stale" ? <History size={15} /> : <ArrowLeftRight size={15} />}
           <div>
             <div className="strong">{w.title}</div>
             <div className="muted small">{w.detail}</div>
@@ -250,7 +272,7 @@ function InfoCards({ facts, nearby, warned }: { facts: Fact[]; nearby: Detail["n
     <div className="info-cards">
       {visible.map((card) => (
         <div key={card.key} className="info-card">
-          <h4 className="row"><span className="grow">{card.title}</span>
+          <h4>{(() => { const Icon = INFO_CARD_ICON[card.key]; return Icon ? <Icon size={15} /> : null; })()}<span className="grow">{card.title}</span>
             {sourceCount(card.facts) > 1 && <span className="muted small" title="Each source is kept separately; different advice is not merged">from {sourceCount(card.facts)} sources</span>}</h4>
           {card.facts.map((f, i) => {
             // For values that change (prices, hours), label the newest one.
@@ -259,7 +281,7 @@ function InfoCards({ facts, nearby, warned }: { facts: Fact[]; nearby: Detail["n
               <FactRow key={f.id} fact={f} source={<FactSource fact={f} />} extra={<>
                 {TIME_SENSITIVE.has(f.type) && card.facts.filter((o) => o.type === f.type).length > 1 &&
                   <><Pill tone={sameTypeEarlier ? "muted" : "ok"}>{sameTypeEarlier ? "Earlier" : "Latest saved"}</Pill>{" "}</>}
-                {warned.has(f.id) && <span title="See “Before you go” above">⚠️ </span>}
+                {warned.has(f.id) && <span title="See “Before you go” above" className="warn-text"><AlertTriangle size={12} /> </span>}
               </>} />
             );
           })}
@@ -283,20 +305,20 @@ export function FactSource({ fact }: { fact: Fact }) {
   if (fact.reelId) {
     return (
       <div className="fact-source">
-        <span>🎬 Instagram Reel</span>
+        <span className="row" style={{ gap: 4 }}><Clapperboard size={12} /> Instagram Reel</span>
         {fact.creator && <span>{fact.creator}</span>}
         <span>· {kind}{fact.sourceTimeSec != null ? ` · ${formatTime(fact.sourceTimeSec)}` : ""}</span>
-        <button onClick={() => nav.openReel(fact.reelId!, fact.sourceTimeSec ?? undefined)}>Source 🔎</button>
+        <button onClick={() => nav.openReel(fact.reelId!, fact.sourceTimeSec ?? undefined)}>View source <ExternalLink size={11} /></button>
       </div>
     );
   }
   return (
     <div className="fact-source">
-      <span>{FACT[fact.type]?.emoji} {kind}</span>
+      <span className="row" style={{ gap: 4 }}>{(() => { const Icon = FACT_ICON[fact.type] ?? Smartphone; return <Icon size={12} />; })()} {kind}</span>
       <span>· {formatDate(fact.validFrom)}</span>
       {fact.sourceType && fact.sourceType !== "unknown" && <span>· {SOURCE[fact.sourceType]}</span>}
       {fact.creator && <span>· {fact.creator}</span>}
-      {fact.screenshotId && <button onClick={() => nav.openScreenshot(fact.screenshotId!, fact.sourceBlockIds)}>Source 🔎</button>}
+      {fact.screenshotId && <button onClick={() => nav.openScreenshot(fact.screenshotId!, fact.sourceBlockIds)}>View source <Search size={11} /></button>}
     </div>
   );
 }
@@ -358,7 +380,7 @@ function AddToTripDialog({ placeId, onClose }: { placeId: string; onClose: () =>
     <Modal title="Add to trip" onClose={onClose}>
       {trips.map((t) => (
         <div key={t.id} className="candidate">
-          <span>✈️ {t.name} <span className="muted small">· {t.placeCount} places</span></span>
+          <span className="row"><Luggage size={14} className="muted" /> {t.name} <span className="muted small">· {t.placeCount} places</span></span>
           <button className="btn" onClick={async () => { await action.run(() => TripService.addPlace(t.id, placeId)); onClose(); }}>Add</button>
         </div>
       ))}
@@ -369,7 +391,7 @@ function AddToTripDialog({ placeId, onClose }: { placeId: string; onClose: () =>
         if (id) { await action.run(() => TripService.addPlace(id, placeId)); reload(); onClose(); }
       }}>
         <input className="grow" placeholder="New trip, e.g. Japan 2027" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="btn primary">Create & add</button>
+        <button className="btn primary"><Plus size={14} /> Create &amp; add</button>
       </form>
     </Modal>
   );

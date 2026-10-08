@@ -1,3 +1,5 @@
+import { Plus } from "lucide-react";
+import { Clapperboard, ExternalLink, Mic, Play, Video } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "../../lib/open";
 import { fileUrl, ReelService } from "../../api/services";
@@ -39,7 +41,7 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
   return (
     <div>
       <div className="detail-head">
-        <h2>🎬 Instagram Reel{r.creator ? ` · ${r.creator}` : ""}</h2>
+        <h2 className="row"><Clapperboard size={22} /> Instagram Reel{r.creator ? ` · ${r.creator}` : ""}</h2>
         <div className="row wrap">
           <Pill tone={status.tone}>{status.label}</Pill>
           {r.durationSec && <Pill>{formatTime(r.durationSec)}</Pill>}
@@ -48,9 +50,9 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
           {r.statusDetail && <span className="muted small">{r.statusDetail}</span>}
         </div>
         <div className="row wrap">
-          <button className="btn" onClick={() => openUrl(r.url)}>Open on Instagram ↗</button>
+          <button className="btn" onClick={() => openUrl(r.url)}>Open on Instagram <ExternalLink size={12} /></button>
           <button className="btn" disabled={busy} onClick={() => action.run(() => ReelService.action(id, "reprocess"))}>↻ Reprocess</button>
-          <button className="btn" onClick={() => setPicker(true)}>🎞️ Import video from Photos</button>
+          <button className="btn" onClick={() => setPicker(true)}><Video size={14} /> Import video from Photos</button>
           <button className="btn" title="Hide it for good: never processed again, not counted as unfinished"
                   onClick={async () => { if (await action.run(() => ReelService.action(id, "ignore")) !== undefined) nav.advanceAfterRemoval(); }}>Ignore</button>
           <button className="btn danger" onClick={async () => { if (await action.run(() => ReelService.action(id, "delete")) !== undefined) nav.advanceAfterRemoval(); }}>Delete</button>
@@ -74,11 +76,11 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
           {mediaSrc ? (
             <video ref={video} src={mediaSrc} controls playsInline onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)} />
           ) : (
-            <Thumb path={r.thumbnailPath} fallback="🎬" />
+            <Thumb path={r.thumbnailPath} fallback={<Clapperboard size={28} />} />
           )}
           {audioSrc && (
             <div className="card">
-              <h4>🎙️ Saved voice audio</h4>
+              <h4 className="row"><Mic size={15} /> Saved voice audio</h4>
               <audio ref={audio} src={audioSrc} controls onTimeUpdate={(e) => !mediaSrc && setCurrent(e.currentTarget.currentTime)} />
             </div>
           )}
@@ -107,7 +109,7 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
           </div>
 
           <div className="card">
-            <div className="row"><h3 className="grow">Places</h3><button className="btn small" onClick={() => setAddingPlace(true)}>＋ Add place</button></div>
+            <div className="row"><h3 className="grow">Places</h3><button className="btn small" onClick={() => setAddingPlace(true)}><Plus size={13} /> Add place</button></div>
             {data.places.length === 0 && <p className="muted small">{busy ? "Working on it…" : "No place found."}</p>}
             {data.places.map((p) => (
               <div key={p.id} className="candidate" style={{ cursor: "pointer" }} onClick={() => nav.openPlace(p.id)}>
@@ -120,7 +122,7 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
               </div>
             ))}
             {data.reviews.some((rv) => !rv.isResolved) && (
-              <button className="btn small" style={{ marginTop: 8 }} onClick={() => nav.go("review")}>Review uncertain results →</button>
+              <button className="btn small" style={{ marginTop: 8 }} onClick={() => nav.go("import", { import: "review" })}>Review uncertain results</button>
             )}
           </div>
 
@@ -131,7 +133,7 @@ export function ReelDetail({ id, seek }: { id: string; seek?: number }) {
                 <FactRow key={f.id} fact={f} source={
                   <div className="fact-source">
                     <span>{SOURCE_KIND[f.sourceKind] ?? f.sourceKind}</span>
-                    {f.sourceTimeSec != null && <button onClick={() => jump(f.sourceTimeSec!)}>{formatTime(f.sourceTimeSec)} ▶</button>}
+                    {f.sourceTimeSec != null && <button onClick={() => jump(f.sourceTimeSec!)}>{formatTime(f.sourceTimeSec)} <Play size={10} /></button>}
                   </div>} />
               ))}
               <AddFact places={data.places} reelId={id} />

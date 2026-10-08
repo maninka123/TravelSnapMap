@@ -122,7 +122,7 @@ export function demoLibrary(): DemoLibrary {
   const places: Place[] = SEEDS.map(([name, category, lat, lon, city, country, code, status], i) => ({
     id: `p${i}`, canonicalName: name, alternativeNames: i === 7 ? ["東京スカイツリー"] : [], mapIdentifier: `m-${i}`,
     latitude: lat, longitude: lon, address: null, city, region: null, country, countryCode: code, category,
-    verification: i === 29 ? "needsReview" : "verified", origin: "mapKit", isUserVerified: i % 5 === 0,
+    verification: i === 28 ? "needsReview" : "verified", origin: "mapKit", isUserVerified: i % 5 === 0,
     personalStatus: status ?? "wantToVisit", notes: i === 2 ? "Go hungry. Cash only at most stalls." : "",
     summaryText: i === 0 ? "Thousands of vermilion torii gates winding up Mount Inari — saved for an early-morning hike before the crowds." : null,
     summaryFactIds: [], summaryGeneratedAt: null, heroImageId: null, createdAt: iso(60 - i), updatedAt: iso(30 - (i % 20)),
@@ -146,7 +146,7 @@ export function demoLibrary(): DemoLibrary {
   screenshots.push(shot("s-fail", 92, "", "failed", 0));
   screenshots.push(shot("s-wait", 93, "", "waitingForNetwork", 0));
   for (let k = 0; k < 6; k++) screenshots.push(shot(`s-nt${k}`, 100 + k, "Group chat", "notTravel", 0));
-  links.push({ placeId: "p29", screenshotId: "s-review" });
+  links.push({ placeId: "p28", screenshotId: "s-review" });
 
   const facts: Fact[] = FACTS.map(([pi, type, text], i) => {
     const link = links.find((l) => l.placeId === `p${pi}`);
@@ -173,7 +173,7 @@ export function demoLibrary(): DemoLibrary {
     review("rv0", "placeResolution", "s-review", null, 'I found "Blue Lagoon" — two places share this name.', "Blue Lagoon", [
       { name: "Blue Lagoon", latitude: 63.8804, longitude: -22.4495, city: "Grindavík", country: "Iceland", countryCode: "IS", address: "Norðurljósavegur 9, Grindavík" },
       { name: "Blue Lagoon", latitude: 36.0128, longitude: 14.3236, city: "Comino", country: "Malta", countryCode: "MT", address: "Comino, Malta" },
-    ], "p29"),
+    ], "p28"),
     review("rv1", "travelClassification", "s-travel?", null, "Looks like weekend ideas, but no specific place is named.", null, []),
     review("rv2", "duplicatePlace", null, null, "These may be the same place.", "Shibuya Sky", [], "p9", "p7"),
     review("rv3", "placeResolution", null, "r2", 'I found "Tokyo Tower" but couldn’t place it on the map — no close match nearby.', "Tokyo Tower", [

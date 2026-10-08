@@ -1,3 +1,5 @@
+import { Plus } from "lucide-react";
+import { Crop } from "lucide-react";
 import { useRef, useState } from "react";
 import { fileUrl, ScreenshotService } from "../../api/services";
 import type { Place, Rect, ScreenshotDetail as Detail } from "../../api/types";
@@ -40,8 +42,8 @@ export function ScreenshotDetail({ id, highlight }: { id: string; highlight?: st
           <button className="btn" onClick={() => action.run(() => ScreenshotService.action(id, "markNotTravel"))}>Not travel</button>
           <button className="btn" title="Hide it for good: never processed again, not counted as unfinished"
                   onClick={async () => { if (await action.run(() => ScreenshotService.action(id, "ignore")) !== undefined) nav.advanceAfterRemoval(); }}>Ignore</button>
-          <button className="btn" onClick={() => setDialog("add")}>＋ Add place</button>
-          {data.places.length > 0 && <button className="btn" onClick={() => setDialog("crop")}>✂️ Crop photo</button>}
+          <button className="btn" onClick={() => setDialog("add")}><Plus size={14} /> Add place</button>
+          {data.places.length > 0 && <button className="btn" onClick={() => setDialog("crop")}><Crop size={14} /> Crop photo</button>}
         </div>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
