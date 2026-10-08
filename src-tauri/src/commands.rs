@@ -218,20 +218,11 @@ pub async fn update_place(state: State<'_, AppState>, id: String, field: String,
 /// the same name right next to it), the two are merged — sources, tips and photos move over. Returns the place id
 /// to show (the merged one if they were merged).
 pub async fn set_place_location(state: State<'_, AppState>, id: String, candidate: PlaceCandidate) -> CmdResult<String> {
-    let db = &state.db;
-    let existing = match merge::find_match(db, &candidate, &[]).map_err(err)? {
-        merge::PlaceMatch::Same(p) if p.id != id => Some(p),
-        _ => None,
-    };
-    if let Some(target) = existing {
-        merge::merge_places(db, &id, &target.id).map_err(err)?;
-        db.set_place_user_verified(&target.id).map_err(err)?;
+    let shown = merge::relocate_place(&state.db, &id, &candidate).map_err(err)?;
+    if shown != id {
         tidy(&state)?;
-        return Ok(target.id);
     }
-    db.update_place_location(&id, &candidate, Verification::UserVerified).map_err(err)?;
-    db.set_place_user_verified(&id).map_err(err)?;
-    Ok(id)
+    Ok(shown)
 }
 
 #[tauri::command]
@@ -251,7 +242,7 @@ pub async fn split_place(state: State<'_, AppState>, place_id: String, screensho
 
 #[tauri::command]
 pub async fn remove_place_screenshot(state: State<'_, AppState>, place_id: String, screenshot_id: String) -> CmdResult<()> {
-    state.db.unlink(&place_id, &screenshot_id).map_err(err)?;
+    state.pipeline.remove_place_from_source(&place_id, Some(&screenshot_id), None).map_err(err)?;
     tidy(&state)
 }
 
@@ -987,6 +978,6 @@ pub async fn add_place_to_reel(state: State<'_, AppState>, reel_id: String, cand
 /// Removes a place from a Reel (the place stays if it has other sources or your own data).
 #[tauri::command]
 pub async fn remove_place_from_reel(state: State<'_, AppState>, place_id: String, reel_id: String) -> CmdResult<()> {
-    state.db.unlink_reel(&place_id, &reel_id).map_err(err)?;
+    state.pipeline.remove_place_from_source(&place_id, None, Some(&reel_id)).map_err(err)?;
     tidy(&state)
 }

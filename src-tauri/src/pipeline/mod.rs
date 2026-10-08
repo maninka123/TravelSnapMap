@@ -355,8 +355,11 @@ impl Pipeline {
         let mut places = extraction.all_places();
         // Resolve the most specific places first so they anchor the rest ("7 places in Kyoto").
         places.sort_by_key(|p| p.ambiguous == Some(true));
-        // Places the user already decided for this source are never re-resolved by AI.
+        // Places the user already decided for this source are never re-resolved by AI, and names the user said
+        // aren't a place here (removed pin, dismissed question) never come back.
+        let rejected = self.db.rejected_source_names(screenshot_id, reel_id).map_err(fail)?;
         places.retain(|p| crate::text::best_similarity(&p.display_name, user_names) < 0.9);
+        places.retain(|p| rejected.is_empty() || crate::text::best_similarity(&p.display_name, &rejected) < 0.9);
         // "Europe", "Japan"… are context, not places to pin.
         places.retain(|p| !crate::text::is_country_or_continent(&p.display_name));
 

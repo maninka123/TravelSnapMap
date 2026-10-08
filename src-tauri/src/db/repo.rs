@@ -260,7 +260,8 @@ impl Database {
             tx.execute("DELETE FROM place_screenshots WHERE screenshot_id = ?1 AND is_user_verified = 0", [screenshot_id])?;
             tx.execute("DELETE FROM travel_facts WHERE screenshot_id = ?1 AND origin != 'user'", [screenshot_id])?;
             tx.execute("DELETE FROM place_images WHERE screenshot_id = ?1 AND origin != 'user'", [screenshot_id])?;
-            tx.execute("DELETE FROM review_items WHERE screenshot_id = ?1", [screenshot_id])?;
+            // Open questions are asked again if still relevant; answered ones stay in "Recently reviewed".
+            tx.execute("DELETE FROM review_items WHERE screenshot_id = ?1 AND is_resolved = 0", [screenshot_id])?;
             // Places left with no evidence and no user edits disappear with it.
             tx.execute(
                 "DELETE FROM places WHERE is_user_verified = 0 AND notes = '' AND personal_status = 'wantToVisit' \

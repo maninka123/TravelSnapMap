@@ -2,6 +2,7 @@
 
 pub mod records;
 mod memories_repo;
+mod overrides_repo;
 mod reels_repo;
 mod repo;
 mod runs_repo;
@@ -33,7 +34,7 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// (schema version reached, SQL). Append new steps; never edit a shipped one.
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -43,6 +44,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (4, include_str!("migration_v4.sql")),
     (5, include_str!("migration_v5.sql")),
     (6, include_str!("migration_v6.sql")),
+    (7, include_str!("migration_v7.sql")),
 ];
 
 /// Library open failures, worded for people rather than developers.
@@ -304,14 +306,57 @@ mod migration_tests {
             db.with(|c| c.execute_batch("PRAGMA user_version = 5")).unwrap();
         }
         let err = Database::open(&path).err().expect("upgrade must fail").to_string();
-        assert!(err.contains("original library is intact") && err.contains("pre-migration-v5-to-v6"), "{err}");
+        assert!(err.contains("original library is intact") && err.contains(&format!("pre-migration-v5-to-v{SCHEMA_VERSION}")), "{err}");
 
-        let conn = Connection::open(&path).unwrap();
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        let marker: String = conn.query_row("SELECT value FROM settings WHERE key = 'marker'", [], |r| r.get(0)).unwrap();
-        assert_eq!((version, marker.as_str()), (5, "my data"), "the failed step was rolled back");
+        {
+            let conn = Connection::open(&path).unwrap();
+            let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            let marker: String = conn.query_row("SELECT value FROM settings WHERE key = 'marker'", [], |r| r.get(0)).unwrap();
+            assert_eq!((version, marker.as_str()), (5, "my data"), "the failed step was rolled back");
+        } // closed before cleanup (Windows can't delete open files)
         let backups: Vec<_> = std::fs::read_dir(dir.join("backups")).unwrap().collect();
         assert_eq!(backups.len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A real v6 library (the last shipped version) with places, trips and reviews upgrades without losing anything.
+    #[test]
+    fn v6_library_upgrades_with_all_data() {
+        let dir = std::env::temp_dir().join(format!("tsm-v6-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("travelsnapmap.sqlite");
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+            for (step, sql) in MIGRATIONS.iter().filter(|(v, _)| *v <= 6) {
+                let tx = conn.transaction().unwrap();
+                tx.execute_batch(sql).unwrap();
+                tx.pragma_update(None, "user_version", step).unwrap();
+                tx.commit().unwrap();
+            }
+            conn.execute_batch(
+                "INSERT INTO places(id, canonical_name, latitude, longitude, map_identifier, notes, created_at, updated_at) \
+                   VALUES ('p1', 'Fushimi Inari Taisha', 34.9671, 135.7727, 'm-fushimi', 'go early', '2025-01-01', '2025-01-01');
+                 INSERT INTO trips(id, name, created_at) VALUES ('t1', 'Japan', '2025-01-01');
+                 INSERT INTO trip_places(id, trip_id, place_id, position, day) VALUES ('tp1', 't1', 'p1', 0, 2);
+                 INSERT INTO review_items(id, kind, message, is_resolved, resolution, created_at) \
+                   VALUES ('r1', 'placeResolution', 'm', 1, 'chose place', '2025-01-01');",
+            ).unwrap();
+        }
+        let db = Database::open(&path).unwrap();
+        let (version, notes, day, reviews): (i64, String, i64, i64) = db.with(|c| Ok((
+            c.query_row("PRAGMA user_version", [], |r| r.get(0))?,
+            c.query_row("SELECT notes FROM places WHERE id = 'p1'", [], |r| r.get(0))?,
+            c.query_row("SELECT day FROM trip_places WHERE id = 'tp1'", [], |r| r.get(0))?,
+            c.query_row("SELECT COUNT(*) FROM review_items", [], |r| r.get(0))?,
+        ))).unwrap();
+        assert_eq!((version, notes.as_str(), day, reviews), (SCHEMA_VERSION, "go early", 2, 1));
+        let new_tables: i64 = db.with(|c| c.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('source_decisions', 'place_aliases')", [], |r| r.get(0),
+        )).unwrap();
+        assert_eq!(new_tables, 2);
+        drop(db);
+        assert_eq!(std::fs::read_dir(dir.join("backups")).unwrap().count(), 1, "a safety copy is made before upgrading");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
