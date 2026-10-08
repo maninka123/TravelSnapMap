@@ -82,6 +82,12 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            // A backup chosen in Settings → Restore replaces the library now, before it is opened.
+            match backup::apply_pending_restore(&data_dir) {
+                Ok(Some(kept)) => log::info!("backup restored; previous library kept in {}", kept.display()),
+                Err(e) => log::error!("could not restore the backup: {e:#}"),
+                _ => {}
+            }
             let db = match Database::open(&data_dir.join("travelsnapmap.sqlite")) {
                 Ok(db) => Arc::new(db),
                 Err(e) => {
@@ -285,6 +291,12 @@ pub fn run() {
             commands::import_reels,
             commands::import_reels_from_file,
             commands::export_places,
+            commands::import_screenshot_files,
+            commands::reorder_trip,
+            commands::export_trip,
+            commands::restore_backup,
+            commands::restart_app,
+            commands::reveal_data_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TravelSnapMap");

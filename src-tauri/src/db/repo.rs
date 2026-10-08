@@ -756,6 +756,24 @@ impl Database {
         Ok(())
     }
 
+    /// Saves a whole itinerary order at once (after drag and drop): each entry gets its day and its position in
+    /// the list. Entries of other trips are never touched; all-or-nothing.
+    pub fn reorder_trip(&self, trip_id: &str, order: &[(String, Option<i64>)]) -> Result<()> {
+        self.transaction(|tx| {
+            for (position, (entry_id, day)) in order.iter().enumerate() {
+                tx.execute(
+                    "UPDATE trip_places SET day = ?3, position = ?4 WHERE id = ?1 AND trip_id = ?2",
+                    params![entry_id, trip_id, day, position as i64],
+                )?;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn trip(&self, id: &str) -> Result<Option<TripRecord>> {
+        Ok(self.list_trips()?.into_iter().find(|t| t.id == id))
+    }
+
     pub fn remove_trip_entry(&self, entry_id: &str) -> Result<()> {
         self.with(|c| c.execute("DELETE FROM trip_places WHERE id = ?1", [entry_id]))?;
         Ok(())

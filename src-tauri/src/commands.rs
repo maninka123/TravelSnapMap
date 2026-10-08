@@ -531,7 +531,7 @@ pub async fn open_external(url: String) -> CmdResult<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Only web links can be opened".into());
     }
-    std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
+    open_with_system(url.as_ref()).map_err(err)?;
     Ok(())
 }
 
@@ -980,4 +980,81 @@ pub async fn add_place_to_reel(state: State<'_, AppState>, reel_id: String, cand
 pub async fn remove_place_from_reel(state: State<'_, AppState>, place_id: String, reel_id: String) -> CmdResult<()> {
     state.pipeline.remove_place_from_source(&place_id, None, Some(&reel_id)).map_err(err)?;
     tidy(&state)
+}
+
+// MARK: Import files, trips, restore
+
+/// Images dropped on the window or picked in the Import screen. They're copied into the library's own import folder
+/// (named by content, so the same picture is never processed twice) and processed like any folder of screenshots —
+/// right away, or as soon as the current scan finishes.
+#[tauri::command]
+pub async fn import_screenshot_files(state: State<'_, AppState>, paths: Vec<String>) -> CmdResult<Value> {
+    let dest = state.pipeline.data_dir.join("imports");
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(std::path::PathBuf::from).collect();
+    let copy_to = dest.clone();
+    let imported = tauri::async_runtime::spawn_blocking(move || crate::services::folder::import_files(&paths, &copy_to))
+        .await.map_err(err)?.map_err(err)?;
+    let folder = dest.to_string_lossy().to_string();
+    let mut config = state.pipeline.config();
+    if !config.screenshot_folders.contains(&folder) {
+        config.screenshot_folders.push(folder.clone());
+        state.db.save_config(&config).map_err(err)?;
+        rebuild_ai(&state, config)?;
+    }
+    let busy = state.queue.snapshot().running;
+    if imported.added > 0 {
+        tauri::async_runtime::spawn(state.queue.clone().run_when_idle(RunMode::ScanFolder { path: folder }));
+    }
+    Ok(json!({ "added": imported.added, "alreadyImported": imported.already_imported, "skipped": imported.skipped, "queuedBehindScan": busy && imported.added > 0 }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct TripOrderItem {
+    id: String,
+    day: Option<i64>,
+}
+
+/// Saves the itinerary after drag and drop: the full order and each entry's day, in one transaction.
+#[tauri::command]
+pub async fn reorder_trip(state: State<'_, AppState>, trip_id: String, order: Vec<TripOrderItem>) -> CmdResult<()> {
+    let order: Vec<(String, Option<i64>)> = order.into_iter().map(|o| (o.id, o.day)).collect();
+    state.db.reorder_trip(&trip_id, &order).map_err(err)
+}
+
+/// Writes the trip as a Markdown itinerary to a file the user chose.
+#[tauri::command]
+pub async fn export_trip(state: State<'_, AppState>, trip_id: String, path: String) -> CmdResult<()> {
+    let md = crate::backup::trip_markdown(&state.db, &trip_id).map_err(err)?;
+    std::fs::write(&path, md).map_err(err)
+}
+
+/// Checks a backup and stages it; it replaces the library when the app restarts (the current one is kept).
+#[tauri::command]
+pub async fn restore_backup(state: State<'_, AppState>, path: String) -> CmdResult<crate::backup::RestorePreview> {
+    if state.queue.snapshot().running {
+        return Err("Stop the current scan before restoring a backup.".into());
+    }
+    let data_dir = state.pipeline.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::backup::stage_restore(std::path::Path::new(&path), &data_dir))
+        .await.map_err(err)?.map_err(err)
+}
+
+/// Restarts the app (e.g. to finish a restore).
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+/// Shows the library folder in Finder (for troubleshooting and manual backups).
+#[tauri::command]
+pub async fn reveal_data_folder(state: State<'_, AppState>) -> CmdResult<()> {
+    open_with_system(state.pipeline.data_dir.as_os_str()).map_err(err)?;
+    Ok(())
+}
+
+/// Opens a web link or folder with the system (Finder / default browser on macOS; test runs on other systems use
+/// their equivalent). Only ever called with a validated https link or the app's own data folder.
+fn open_with_system(target: &std::ffi::OsStr) -> std::io::Result<()> {
+    let program = if cfg!(target_os = "macos") { "open" } else if cfg!(target_os = "windows") { "explorer" } else { "xdg-open" };
+    std::process::Command::new(program).arg(target).spawn().map(|_| ())
 }

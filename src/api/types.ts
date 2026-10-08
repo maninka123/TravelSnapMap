@@ -22,7 +22,7 @@ export type ProcessingStatus =
   | "waitingForNetwork" | "needsMedia" | "ignored" | "failed";
 
 export type Verification = "verified" | "needsReview" | "userVerified";
-export type DataOrigin = "ai" | "mapKit" | "local" | "user";
+export type DataOrigin = "ai" | "mapKit" | "local" | "user" | "manual";
 export type ReviewKind = "travelClassification" | "placeResolution" | "duplicatePlace" | "photoCrop" | "processingFailure";
 
 export interface Rect { x: number; y: number; width: number; height: number }
