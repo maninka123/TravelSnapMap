@@ -7,8 +7,7 @@ rust-version = "1.80"
 
 [lib]
 name = "travelsnapmap_lib"
-# Desktop only: no mobile static/dynamic library builds.
-crate-type = ["rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

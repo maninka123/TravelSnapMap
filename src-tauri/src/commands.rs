@@ -1089,9 +1089,8 @@ pub async fn reveal_data_folder(state: State<'_, AppState>) -> CmdResult<()> {
     Ok(())
 }
 
-/// Opens a web link or folder with the system (Finder / default browser on macOS; test runs on other systems use
-/// their equivalent). Only ever called with a validated https link or the app's own data folder.
+/// Opens a web link or folder with macOS `open` (default browser / Finder). Only ever called with a validated link or
+/// the app's own data folder.
 fn open_with_system(target: &std::ffi::OsStr) -> std::io::Result<()> {
-    let program = if cfg!(target_os = "macos") { "open" } else if cfg!(target_os = "windows") { "explorer" } else { "xdg-open" };
-    std::process::Command::new(program).arg(target).spawn().map(|_| ())
+    std::process::Command::new("open").arg(target).spawn().map(|_| ())
 }

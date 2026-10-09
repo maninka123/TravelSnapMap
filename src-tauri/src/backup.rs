@@ -390,7 +390,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "macos"), ignore = "zips with macOS ditto")]
     fn backup_contains_library_and_files_but_never_the_api_key() {
         let dir = std::env::temp_dir().join(format!("tsm-backup-{}", uuid::Uuid::new_v4()));
         let data = dir.join("data");

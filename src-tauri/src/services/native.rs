@@ -223,10 +223,6 @@ impl NativeBridge {
     }
 
     async fn spawn(&self) -> Result<BridgeProcess> {
-        // The helper uses PhotoKit, Vision, Speech and MapKit. Other systems can run the app for testing only.
-        if !cfg!(target_os = "macos") {
-            anyhow::bail!("Apple Photos, text recognition, speech and Apple Maps need macOS — this is a test run on another system");
-        }
         let mut child = Command::new(&self.binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
