@@ -125,6 +125,20 @@ impl ProcessingQueue {
         self.update(|s| s.phase = "Stopping after current screenshots…".into());
     }
 
+    /// Runs `mode` as soon as no other scan is running (e.g. files dropped during a scan).
+    pub async fn run_when_idle(self: Arc<Self>, mode: RunMode) -> Option<String> {
+        for _ in 0..(6 * 60 * 60 / 2) {
+            if !self.snapshot().running {
+                if let Some(id) = self.clone().run(mode.clone()).await {
+                    return Some(id);
+                }
+                if !self.snapshot().running { return None; }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        None
+    }
+
     /// Runs one scan. Returns the run id (for Scan New and Validation) when finished.
     pub async fn run(self: Arc<Self>, mode: RunMode) -> Option<String> {
         {

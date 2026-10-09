@@ -220,6 +220,7 @@ mod tests {
         assert!(db.place(&manual.id).unwrap().is_some(), "added by hand");
         assert!(db.place(&stray.id).unwrap().is_none(), "automatic, nothing behind it");
         assert!(db.place(&noted.id).unwrap().is_some(), "still has your notes");
+        drop(db); // closed before cleanup (Windows can't delete open files)
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

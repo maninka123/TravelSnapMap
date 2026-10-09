@@ -23,6 +23,10 @@ pub fn find_match(db: &Database, cand: &PlaceCandidate, extra_names: &[String]) 
         if let Some(p) = db.place_by_map_identifier(map_id)? {
             return Ok(PlaceMatch::Same(p));
         }
+        // Merged into another place, or the wrong location of a place you corrected.
+        if let Some(p) = db.place_by_alias(map_id)? {
+            return Ok(PlaceMatch::Same(p));
+        }
     }
     let mut names = vec![cand.name.clone()];
     names.extend(extra_names.iter().cloned());
@@ -223,6 +227,15 @@ pub fn merge_places(db: &Database, source_id: &str, target_id: &str) -> Result<(
         }
     }
     db.transaction(|tx| {
+        // Re-processing a source of the merged place must find the target, not recreate the old place.
+        tx.execute("UPDATE place_aliases SET place_id = ?2 WHERE place_id = ?1", params![source_id, target_id])?;
+        if let Some(map_id) = source.map_identifier.as_deref().filter(|m| target.map_identifier.as_deref() != Some(*m)) {
+            tx.execute(
+                "INSERT INTO place_aliases(map_identifier, place_id, reason, created_at) VALUES (?1, ?2, 'merged', ?3) \
+                 ON CONFLICT(map_identifier) DO UPDATE SET place_id = excluded.place_id, reason = excluded.reason",
+                params![map_id, target_id, crate::db::now()],
+            )?;
+        }
         tx.execute(
             "INSERT OR IGNORE INTO place_screenshots(place_id, screenshot_id, extracted_name, confidence, origin, is_user_verified, created_at) \
              SELECT ?2, screenshot_id, extracted_name, confidence, origin, is_user_verified, created_at FROM place_screenshots WHERE place_id = ?1",
@@ -252,6 +265,26 @@ pub fn merge_places(db: &Database, source_id: &str, target_id: &str) -> Result<(
         tx.execute("DELETE FROM places WHERE id = ?1", [source_id])?;
         Ok(())
     })
+}
+
+/// User action: the place is really at `candidate`. If that's a place you already have (same Apple Maps place, or the
+/// same name right next to it), the two are merged. The old map identifier keeps pointing here, so re-processing a
+/// source that the map once matched to the wrong spot never brings the wrong pin back. Returns the place to show.
+pub fn relocate_place(db: &Database, place_id: &str, candidate: &PlaceCandidate) -> Result<String> {
+    let place = db.place(place_id)?.ok_or_else(|| anyhow::anyhow!("place not found"))?;
+    if let PlaceMatch::Same(target) = find_match(db, candidate, &[])? {
+        if target.id != place_id {
+            merge_places(db, place_id, &target.id)?;
+            db.set_place_user_verified(&target.id)?;
+            return Ok(target.id);
+        }
+    }
+    if let Some(old) = place.map_identifier.as_deref().filter(|m| candidate.map_identifier.as_deref() != Some(*m)) {
+        db.add_place_alias(old, place_id, "relocated")?;
+    }
+    db.update_place_location(place_id, candidate, Verification::UserVerified)?;
+    db.set_place_user_verified(place_id)?;
+    Ok(place_id.to_string())
 }
 
 /// User action: move some sources (screenshot or Reel ids, with their facts and photos) out of a wrongly merged place.

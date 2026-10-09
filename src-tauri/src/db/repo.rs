@@ -260,7 +260,8 @@ impl Database {
             tx.execute("DELETE FROM place_screenshots WHERE screenshot_id = ?1 AND is_user_verified = 0", [screenshot_id])?;
             tx.execute("DELETE FROM travel_facts WHERE screenshot_id = ?1 AND origin != 'user'", [screenshot_id])?;
             tx.execute("DELETE FROM place_images WHERE screenshot_id = ?1 AND origin != 'user'", [screenshot_id])?;
-            tx.execute("DELETE FROM review_items WHERE screenshot_id = ?1", [screenshot_id])?;
+            // Open questions are asked again if still relevant; answered ones stay in "Recently reviewed".
+            tx.execute("DELETE FROM review_items WHERE screenshot_id = ?1 AND is_resolved = 0", [screenshot_id])?;
             // Places left with no evidence and no user edits disappear with it.
             tx.execute(
                 "DELETE FROM places WHERE is_user_verified = 0 AND notes = '' AND personal_status = 'wantToVisit' \
@@ -753,6 +754,24 @@ impl Database {
             params![entry_id, day, position],
         ))?;
         Ok(())
+    }
+
+    /// Saves a whole itinerary order at once (after drag and drop): each entry gets its day and its position in
+    /// the list. Entries of other trips are never touched; all-or-nothing.
+    pub fn reorder_trip(&self, trip_id: &str, order: &[(String, Option<i64>)]) -> Result<()> {
+        self.transaction(|tx| {
+            for (position, (entry_id, day)) in order.iter().enumerate() {
+                tx.execute(
+                    "UPDATE trip_places SET day = ?3, position = ?4 WHERE id = ?1 AND trip_id = ?2",
+                    params![entry_id, trip_id, day, position as i64],
+                )?;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn trip(&self, id: &str) -> Result<Option<TripRecord>> {
+        Ok(self.list_trips()?.into_iter().find(|t| t.id == id))
     }
 
     pub fn remove_trip_entry(&self, entry_id: &str) -> Result<()> {

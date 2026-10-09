@@ -41,6 +41,8 @@ export const ProcessingService = {
   resume: () => invoke<void>("resume_processing"),
   cancel: () => invoke<void>("cancel_processing"),
   status: () => invoke<QueueSnapshot>("processing_status"),
+  /** Images dropped or picked: copied into the library (never twice) and read now or after the current scan. */
+  importFiles: (paths: string[]) => invoke<ImportedFiles>("import_screenshot_files", { paths }),
   reprocess: (scope: "failed" | "needsReview" | "outdated" | "all" | "selected", ids?: string[]) =>
     invoke<number>("reprocess", { scope, ids: ids ?? null }),
   onProgress: (cb: (s: QueueSnapshot) => void): Promise<UnlistenFn> =>
@@ -131,6 +133,10 @@ export const TripService = {
   updateEntry: (entryId: string, day: number | null, position: number | null) =>
     invoke<void>("update_trip_entry", { entryId, day, position }),
   removeEntry: (entryId: string) => invoke<void>("remove_trip_entry", { entryId }),
+  /** Saves the whole itinerary order (after drag and drop): each entry with its day, in list order. */
+  reorder: (tripId: string, order: { id: string; day: number | null }[]) => invoke<void>("reorder_trip", { tripId, order }),
+  /** Writes a Markdown itinerary to the chosen file. */
+  exportMarkdown: (tripId: string, path: string) => invoke<void>("export_trip", { tripId, path }),
 };
 
 export const SettingsService = {
@@ -188,6 +194,14 @@ export const BackupService = {
   /** Database, place photos/crops, Reel audio/frames and settings — never the API key. */
   backup: (path: string) => invoke<BackupSummary>("backup_library", { path }),
   exportPlaces: (path: string, format: "json" | "geojson") => invoke<number>("export_places", { path, format }),
+  /** Checks a backup and stages it; it replaces the library after a restart (the current one is kept). */
+  restore: (path: string) => invoke<RestorePreview>("restore_backup", { path }),
+  cancelRestore: () => invoke<void>("cancel_restore"),
+  restart: () => invoke<void>("restart_app"),
+  revealDataFolder: () => invoke<void>("reveal_data_folder"),
 };
+
+export interface RestorePreview { places: number; screenshots: number; reels: number; trips: number; schemaVersion: number }
+export interface ImportedFiles { added: number; alreadyImported: number; skipped: number; queuedBehindScan: boolean }
 
 export interface BulkReelImport { found: number; added: number; alreadyImported: number; ids: string[] }

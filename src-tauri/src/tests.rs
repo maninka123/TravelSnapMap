@@ -751,3 +751,96 @@ async fn choosing_a_place_in_review_keeps_reel_timestamps() {
     assert_eq!((fact.source_kind.as_str(), fact.source_time_sec), ("audio", Some(8.0)), "provenance survives the correction");
     assert_eq!(h.db.reel(&id).unwrap().unwrap().status, ProcessingStatus::Complete);
 }
+
+// MARK: Corrections survive re-processing
+
+const KYOTO_TEXT: &str = "5 places you need to visit in Kyoto\n1. Fushimi Inari\nGo before 8 AM to avoid crowds\n2. Kiyomizu-dera\n3. Nishiki Market\n4. Arashiyama Bamboo Grove";
+
+#[tokio::test]
+async fn removed_pin_stays_removed_after_reprocessing() {
+    let h = Harness::new();
+    let id = h.screenshot("rm", "2025-03-01T00:00:00Z", KYOTO_TEXT, json(KYOTO));
+    h.pipeline.process(&id).await;
+    let nishiki = h.places().into_iter().find(|p| p.canonical_name == "Nishiki Market").unwrap();
+
+    h.pipeline.remove_place_from_source(&nishiki.id, Some(&id), None).unwrap();
+    assert_eq!(h.db.links_for_screenshot(&id).unwrap().len(), 3);
+
+    h.pipeline.reprocess(&id).await.unwrap();
+    let linked: Vec<String> = h.db.places_for_screenshot(&id).unwrap().into_iter().map(|p| p.canonical_name).collect();
+    assert_eq!(linked.len(), 3, "{linked:?}");
+    assert!(!linked.contains(&"Nishiki Market".to_string()), "the removed pin came back: {linked:?}");
+}
+
+#[tokio::test]
+async fn not_a_place_answer_survives_reprocessing() {
+    let h = Harness::new();
+    let id = h.screenshot("np", "2025-01-01T00:00:00Z", "Blue Lagoon\nMust visit! Travel goals",
+        json(r#"{"is_travel_related": true, "travel_confidence": 0.9, "places": [{"display_name": "Blue Lagoon", "ambiguous": true}]}"#));
+    assert_eq!(h.pipeline.process(&id).await, ProcessingStatus::NeedsReview);
+    let review = h.db.open_reviews().unwrap().into_iter().find(|r| r.kind == ReviewKind::PlaceResolution).unwrap();
+    h.pipeline.resolve_review(&review.id, "dismiss", None).await.unwrap();
+
+    assert_eq!(h.pipeline.reprocess(&id).await.unwrap(), ProcessingStatus::Complete);
+    assert!(h.db.open_reviews().unwrap().is_empty(), "the same question was asked again");
+    assert!(h.places().is_empty());
+    // The answer is still listed under Recently reviewed.
+    let answered = h.db.reviews_for_screenshot(&id).unwrap();
+    assert!(answered.iter().any(|r| r.is_resolved && r.resolution.as_deref() == Some("not a place")));
+}
+
+#[tokio::test]
+async fn merged_places_stay_merged_after_reprocessing() {
+    let h = Harness::new();
+    let a = h.screenshot("mg1", "2025-01-01T00:00:00Z", "Fushimi Inari\nThings to do in Kyoto",
+        json(r#"{"is_travel_related": true, "travel_confidence": 0.95, "places": [{"display_name": "Fushimi Inari", "country": "Japan"}]}"#));
+    let b = h.screenshot("mg2", "2025-01-02T00:00:00Z", "Kiyomizu-dera\nThings to do in Kyoto",
+        json(r#"{"is_travel_related": true, "travel_confidence": 0.95, "places": [{"display_name": "Kiyomizu-dera", "country": "Japan"}]}"#));
+    h.pipeline.process(&a).await;
+    h.pipeline.process(&b).await;
+    let places = h.places();
+    let fushimi = places.iter().find(|p| p.canonical_name.starts_with("Fushimi")).unwrap().clone();
+    let kiyomizu = places.iter().find(|p| p.canonical_name == "Kiyomizu-dera").unwrap().clone();
+
+    merge::merge_places(&h.db, &kiyomizu.id, &fushimi.id).unwrap();
+    h.pipeline.reprocess(&b).await.unwrap();
+
+    let places = h.places();
+    assert_eq!(places.len(), 1, "the merged place was recreated: {:?}", places.iter().map(|p| &p.canonical_name).collect::<Vec<_>>());
+    assert_eq!(h.db.places_for_screenshot(&b).unwrap()[0].id, fushimi.id);
+}
+
+#[tokio::test]
+async fn corrected_location_survives_reprocessing() {
+    let h = Harness::new();
+    let id = h.screenshot("loc", "2025-01-01T00:00:00Z", "Tokyo Skytree\nThings to do in Japan",
+        json(r#"{"is_travel_related": true, "travel_confidence": 0.95, "places": [{"display_name": "Tokyo Skytree", "country": "Japan"}]}"#));
+    h.pipeline.process(&id).await;
+    let place = h.places()[0].clone();
+
+    // The user moves the pin to the right spot (a different Apple Maps entry ~5 km away).
+    let right = cand("Tokyo Skytree Town", 35.7400, 139.8400, "JP", "Japan", "Tokyo", "m-skytree-town");
+    assert_eq!(merge::relocate_place(&h.db, &place.id, &right).unwrap(), place.id);
+
+    h.pipeline.reprocess(&id).await.unwrap();
+    let places = h.places();
+    assert_eq!(places.len(), 1, "the wrong pin came back");
+    assert_eq!((places[0].latitude, places[0].map_identifier.as_deref()), (35.7400, Some("m-skytree-town")));
+    assert_eq!(h.db.places_for_screenshot(&id).unwrap()[0].id, place.id);
+}
+
+#[tokio::test]
+async fn reprocessing_twice_creates_no_duplicates() {
+    let h = Harness::new();
+    let id = h.screenshot("idem", "2025-03-01T00:00:00Z", KYOTO_TEXT, json(KYOTO));
+    h.pipeline.process(&id).await;
+    let before: Vec<(String, usize)> = h.places().iter().map(|p| (p.canonical_name.clone(), h.db.facts_for_place(&p.id).unwrap().len())).collect();
+    h.pipeline.reprocess(&id).await.unwrap();
+    h.pipeline.reprocess(&id).await.unwrap();
+    let mut after: Vec<(String, usize)> = h.places().iter().map(|p| (p.canonical_name.clone(), h.db.facts_for_place(&p.id).unwrap().len())).collect();
+    let mut before = before;
+    before.sort();
+    after.sort();
+    assert_eq!(before, after);
+    assert_eq!(h.ai.calls.load(Ordering::SeqCst), 1, "re-processing reuses the cached AI result");
+}

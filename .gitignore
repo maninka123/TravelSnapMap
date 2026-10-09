@@ -17,3 +17,5 @@ src-tauri/binaries/
 !.vscode/extensions.json
 .idea/
 *.tsbuildinfo
+coverage/
+.vite/

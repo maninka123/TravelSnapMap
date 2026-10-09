@@ -1,3 +1,4 @@
+import { ImagePlus } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
@@ -30,9 +31,9 @@ export function PlacePhotos({ place, images, screenshots, reels, onNotTravel }: 
   const coverOf = (kind: "screenshot" | "reel" | "photo", id: string) => !place.coverMemoryId && !!hero &&
     (kind === "photo" ? hero.id === id : kind === "screenshot" ? hero.origin !== "user" && hero.screenshotId === id : hero.origin !== "user" && hero.reelId === id);
   const sources = [
-    ...reels.map((r) => ({ kind: "reel" as const, id: r.id, thumb: r.thumbnailPath, date: r.createdAt, label: `🎬 Instagram Reel${r.creator ? ` · ${r.creator}` : ""}`, review: r.status === "needsReview" })),
+    ...reels.map((r) => ({ kind: "reel" as const, id: r.id, thumb: r.thumbnailPath, date: r.createdAt, label: `Instagram Reel${r.creator ? ` · ${r.creator}` : ""}`, review: r.status === "needsReview" })),
     ...screenshots.map((s) => ({ kind: "screenshot" as const, id: s.id, thumb: s.thumbnailPath, date: s.creationDate,
-      label: `📸 ${s.sourceType && s.sourceType !== "unknown" ? SOURCE[s.sourceType] : "Screenshot"}${s.creator ? ` · ${s.creator}` : ""}`, review: s.status === "needsReview" })),
+      label: `${s.sourceType && s.sourceType !== "unknown" ? SOURCE[s.sourceType] : "Screenshot"}${s.creator ? ` · ${s.creator}` : ""}`, review: s.status === "needsReview" })),
   ];
   const list = sources.map((x) => ({ type: x.kind, id: x.id }));
 
@@ -95,7 +96,7 @@ export function PlacePhotos({ place, images, screenshots, reels, onNotTravel }: 
       <div className="section">
         <h3>Photos &amp; sources</h3><span className="muted small">{sources.length + own.length}</span>
         <span className="spacer" />
-        <button className="btn small" disabled={action.busy} onClick={choose}>＋ Add photos…</button>
+        <button className="btn small" disabled={action.busy} onClick={choose}><ImagePlus size={13} /> Add photos…</button>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
       <div ref={zone} className={`photo-zone ${dragOver ? "drag-over" : ""}`}>
@@ -117,7 +118,7 @@ export function PlacePhotos({ place, images, screenshots, reels, onNotTravel }: 
           ))}
           {/* Always-visible drop target: drag files here, paste (⌘V), or click to choose. */}
           <button className={`photo-add ${dragOver ? "drag-over" : ""}`} onClick={choose} disabled={action.busy}>
-            <span className="photo-add-plus">{action.busy ? "…" : "＋"}</span>
+            <span className="photo-add-plus">{action.busy ? "…" : <ImagePlus size={24} strokeWidth={1.6} />}</span>
             <span className="photo-add-title">{action.busy ? "Adding…" : dragOver ? "Drop to add" : "Drop photos here"}</span>
             <span className="photo-add-sub">or paste ⌘V · click to choose</span>
           </button>
@@ -137,7 +138,7 @@ function MediaCard({ thumb, title, sub, cover, review, onOpen, onCover, onRemove
     <figure className={`photo-card ${cover ? "is-cover" : ""} ${portrait ? "portrait" : ""} ${isSource ? "is-source" : ""}`} onClick={onOpen}>
       <Thumb path={thumb} />
       <div className="photo-card-actions" onClick={(e) => e.stopPropagation()}>
-        {cover ? <span className="photo-chip">★ Cover</span> : <button className="photo-chip" title="Use as the place's cover" onClick={onCover}>☆ Set cover</button>}
+        {cover ? <span className="photo-chip">Cover</span> : <button className="photo-chip" title="Use as the place's cover" onClick={onCover}>Set cover</button>}
         <button className="close-btn small photo-remove" title={removeTitle} aria-label={removeTitle} onClick={onRemove}>✕</button>
       </div>
       <figcaption>
@@ -167,8 +168,8 @@ function PhotoViewer({ place, img, onClose }: { place: Place; img: PlaceImage; o
           <span className="muted small">{img.origin === "user" ? "Your photo" : "Cut from one of your screenshots"}</span>
           <ErrorNote error={action.error} onClose={action.clearError} />
           <div className="row wrap">
-            {isCover ? <Pill tone="ok">★ Cover photo</Pill> : (
-              <button className="btn" onClick={() => action.run(() => PlaceService.update(place.id, "heroImageId", img.id))}>☆ Set as cover</button>
+            {isCover ? <Pill tone="ok">Cover photo</Pill> : (
+              <button className="btn" onClick={() => action.run(() => PlaceService.update(place.id, "heroImageId", img.id))}>Set as cover</button>
             )}
             <span className="spacer" />
             <button className="btn danger" onClick={async () => { if (await action.run(() => PlaceService.removeImage(img.id)) !== undefined) onClose(); }}>Remove</button>

@@ -1,3 +1,5 @@
+import { Plus } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { PlaceService } from "../api/services";
 import type { Fact, Place, TravelFactType } from "../api/types";
@@ -5,7 +7,7 @@ import { FACT } from "../lib/labels";
 import { useAction } from "../lib/nav";
 import { ErrorNote, Pill } from "./common";
 
-const TYPES = Object.entries(FACT) as [TravelFactType, { label: string; emoji: string }][];
+const TYPES = Object.entries(FACT) as [TravelFactType, { label: string }][];
 
 /** One saved tip that you can edit or delete. Edited tips are yours and survive reprocessing. */
 export function FactRow({ fact, source, extra }: { fact: Fact; source?: ReactNode; extra?: ReactNode }) {
@@ -23,7 +25,7 @@ export function FactRow({ fact, source, extra }: { fact: Fact; source?: ReactNod
       <div className="fact fact-editing">
         <div className="row">
           <select value={type} onChange={(e) => setType(e.target.value as TravelFactType)}>
-            {TYPES.map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}
+            {TYPES.map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
           </select>
         </div>
         <textarea autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)}
@@ -41,12 +43,12 @@ export function FactRow({ fact, source, extra }: { fact: Fact; source?: ReactNod
     <div className="fact">
       <div className="row">
         <div className="fact-text grow">
-          {extra}{FACT[fact.type]?.emoji} {fact.text}
+          {extra}{fact.text}
           {fact.origin === "user" && <> <Pill tone="muted">edited by you</Pill></>}
         </div>
         <span className="fact-actions">
-          <button className="icon-btn small" title="Edit" onClick={() => setEditing(true)}>✎</button>
-          <button className="icon-btn small" title="Delete" onClick={() => action.run(() => PlaceService.deleteFact(fact.id))}>🗑</button>
+          <button className="icon-btn" title="Edit" aria-label="Edit tip" onClick={() => setEditing(true)}><Pencil size={13} /></button>
+          <button className="icon-btn" title="Delete" aria-label="Delete tip" onClick={() => action.run(() => PlaceService.deleteFact(fact.id))}><Trash2 size={13} /></button>
         </span>
       </div>
       {fact.sourceQuote && fact.origin !== "user" && <div className="muted small">“{fact.sourceQuote}”</div>}
@@ -55,7 +57,7 @@ export function FactRow({ fact, source, extra }: { fact: Fact; source?: ReactNod
   );
 }
 
-/** "＋ Add a tip" for a place (optionally tied to the screenshot or Reel being viewed). */
+/** "Add a tip" for a place (optionally tied to the screenshot or Reel being viewed). */
 export function AddFact({ places, screenshotId, reelId }: { places: Place[]; screenshotId?: string; reelId?: string }) {
   const [open, setOpen] = useState(false);
   const [placeId, setPlaceId] = useState(places[0]?.id ?? "");
@@ -63,7 +65,7 @@ export function AddFact({ places, screenshotId, reelId }: { places: Place[]; scr
   const [text, setText] = useState("");
   const action = useAction();
   if (places.length === 0) return null;
-  if (!open) return <button className="btn small ghost add-fact-btn" onClick={() => setOpen(true)}>＋ Add a tip</button>;
+  if (!open) return <button className="btn small ghost add-fact-btn" onClick={() => setOpen(true)}><Plus size={13} /> Add a tip</button>;
 
   const save = async () => {
     const id = await action.run(() => PlaceService.addFact(placeId || places[0].id, type, text, screenshotId ?? null, reelId ?? null));
@@ -78,7 +80,7 @@ export function AddFact({ places, screenshotId, reelId }: { places: Place[]; scr
           </select>
         )}
         <select value={type} onChange={(e) => setType(e.target.value as TravelFactType)}>
-          {TYPES.map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}
+          {TYPES.map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
         </select>
       </div>
       <textarea autoFocus rows={2} placeholder="e.g. Go before 8 am to avoid the crowds" value={text} onChange={(e) => setText(e.target.value)}

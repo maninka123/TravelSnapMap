@@ -1,3 +1,5 @@
+import { AlertTriangle, CheckCircle2, Circle, Loader2, SkipForward } from "lucide-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { ReelService } from "../../api/services";
 import type { Reel, ReelStage } from "../../api/types";
@@ -14,7 +16,10 @@ const STAGES: { key: ReelStage; label: string }[] = [
   { key: "places", label: "Places resolved" },
 ];
 
-const ICON: Record<string, string> = { pending: "○", running: "⏳", done: "✅", skipped: "⏭️", failed: "⚠️" };
+const ICON: Record<string, ReactNode> = {
+  pending: <Circle size={14} className="faint" />, running: <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />,
+  done: <CheckCircle2 size={14} className="ok-text" />, skipped: <SkipForward size={14} className="faint" />, failed: <AlertTriangle size={14} className="warn-text" />,
+};
 
 /** Each stage of Reel processing, with what it found. A failed stage doesn't stop the others. */
 export function ReelStages({ reel }: { reel: Reel }) {

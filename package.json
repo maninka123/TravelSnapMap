@@ -1,31 +1,44 @@
 {
   "name": "travelsnapmap",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "demo": "vite --mode demo",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "sh scripts/tauri.sh",
     "typecheck": "tsc -b --noEmit",
-    "test": "cd src-tauri && cargo test",
+    "test": "vitest run",
+    "test:rust": "cd src-tauri && cargo test",
     "build:bridge": "sh scripts/build-bridge.sh"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "1.1.23",
+    "@radix-ui/react-dropdown-menu": "2.1.24",
+    "@radix-ui/react-popover": "1.1.23",
+    "@radix-ui/react-tooltip": "1.2.16",
+    "@tanstack/react-virtual": "3.14.13",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "flag-icons": "^7.5.0",
+    "lucide-react": "1.47.0",
     "maplibre-gl": "^5",
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^5",
+    "jsdom": "^27.4.0",
     "typescript": "^5.8",
-    "vite": "^7"
+    "vite": "^7",
+    "vitest": "3.2.4"
   }
 }

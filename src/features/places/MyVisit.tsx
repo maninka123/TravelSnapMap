@@ -1,3 +1,4 @@
+import { CalendarDays, Check, ImagePlus, MapPin } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { fileUrl, MemoryService, PlaceService } from "../../api/services";
 import type { Memory, OwnPhoto, Place } from "../../api/types";
@@ -23,8 +24,8 @@ export function MyVisit({ place, memories }: { place: Place; memories: Memory[] 
           <div className="strong">Been here?</div>
           <div className="muted small">Mark it visited, add the date, your own notes and your photos from Photos — your wishlist becomes a travel memory map.</div>
         </div>
-        <button className="btn" onClick={() => action.run(() => PlaceService.update(place.id, "personalStatus", "visited"))}>✅ I've been here</button>
-        <button className="btn primary" onClick={() => setPicking(true)}>📷 Add my photos…</button>
+        <button className="btn" onClick={() => action.run(() => PlaceService.update(place.id, "personalStatus", "visited"))}><Check size={14} /> I've been here</button>
+        <button className="btn primary" onClick={() => setPicking(true)}><ImagePlus size={14} /> Add my photos…</button>
         {picking && <MemoryPicker place={place} onClose={() => setPicking(false)} />}
       </div>
     );
@@ -40,7 +41,7 @@ export function MyVisit({ place, memories }: { place: Place; memories: Memory[] 
         {place.coverMemoryId && (
           <button className="btn small" onClick={() => action.run(() => PlaceService.update(place.id, "coverMemoryId", null))}>Use saved photo as cover</button>
         )}
-        <button className="btn primary small" onClick={() => setPicking(true)}>📷 Add my photos…</button>
+        <button className="btn primary small" onClick={() => setPicking(true)}><ImagePlus size={13} /> Add my photos…</button>
       </div>
       <ErrorNote error={action.error} onClose={action.clearError} />
       {memories.length > 0 ? (
@@ -139,8 +140,8 @@ function MemoryPicker({ place, onClose }: { place: Place; onClose: () => void })
     <Modal title={`Your photos from ${place.canonicalName}`} onClose={onClose} wide>
       <div className="row wrap">
         <div className="segmented">
-          <button className={mode === "near" ? "active" : ""} onClick={() => setMode("near")}>📍 Taken here</button>
-          <button className={mode === "dates" ? "active" : ""} onClick={() => setMode("dates")}>📅 On certain days</button>
+          <button className={mode === "near" ? "active" : ""} onClick={() => setMode("near")}><MapPin size={13} /> Taken here</button>
+          <button className={mode === "dates" ? "active" : ""} onClick={() => setMode("dates")}><CalendarDays size={13} /> On certain days</button>
         </div>
         {mode === "near" ? (
           <select value={radius} onChange={(e) => setRadius(Number(e.target.value))}>

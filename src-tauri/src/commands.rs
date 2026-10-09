@@ -218,20 +218,11 @@ pub async fn update_place(state: State<'_, AppState>, id: String, field: String,
 /// the same name right next to it), the two are merged — sources, tips and photos move over. Returns the place id
 /// to show (the merged one if they were merged).
 pub async fn set_place_location(state: State<'_, AppState>, id: String, candidate: PlaceCandidate) -> CmdResult<String> {
-    let db = &state.db;
-    let existing = match merge::find_match(db, &candidate, &[]).map_err(err)? {
-        merge::PlaceMatch::Same(p) if p.id != id => Some(p),
-        _ => None,
-    };
-    if let Some(target) = existing {
-        merge::merge_places(db, &id, &target.id).map_err(err)?;
-        db.set_place_user_verified(&target.id).map_err(err)?;
+    let shown = merge::relocate_place(&state.db, &id, &candidate).map_err(err)?;
+    if shown != id {
         tidy(&state)?;
-        return Ok(target.id);
     }
-    db.update_place_location(&id, &candidate, Verification::UserVerified).map_err(err)?;
-    db.set_place_user_verified(&id).map_err(err)?;
-    Ok(id)
+    Ok(shown)
 }
 
 #[tauri::command]
@@ -251,7 +242,7 @@ pub async fn split_place(state: State<'_, AppState>, place_id: String, screensho
 
 #[tauri::command]
 pub async fn remove_place_screenshot(state: State<'_, AppState>, place_id: String, screenshot_id: String) -> CmdResult<()> {
-    state.db.unlink(&place_id, &screenshot_id).map_err(err)?;
+    state.pipeline.remove_place_from_source(&place_id, Some(&screenshot_id), None).map_err(err)?;
     tidy(&state)
 }
 
@@ -534,14 +525,51 @@ pub async fn reel_tool_status(state: State<'_, AppState>) -> CmdResult<Value> {
     Ok(json!({ "ytDlp": path.map(|p| p.to_string_lossy().to_string()) }))
 }
 
-/// Opens an http(s) link in the default browser.
+/// The only non-web link the app opens: the Photos pane of macOS System Settings (when access was denied).
+const PHOTOS_PRIVACY_SETTINGS: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos";
+
+/// Opens an http(s) link in the default browser (or the Photos privacy settings). Anything else is refused, so a link
+/// that came from imported text can never launch an app or open a local file.
 #[tauri::command]
 pub async fn open_external(url: String) -> CmdResult<()> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
+    if !is_openable_link(&url) {
         return Err("Only web links can be opened".into());
     }
-    std::process::Command::new("open").arg(&url).spawn().map_err(err)?;
+    open_with_system(url.as_ref()).map_err(err)?;
     Ok(())
+}
+
+pub(crate) fn is_openable_link(url: &str) -> bool {
+    if url == PHOTOS_PRIVACY_SETTINGS {
+        return true;
+    }
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
+    // A host must follow, and nothing that a shell or `open` could misread (spaces, control characters).
+    rest.is_some_and(|r| !r.is_empty() && !r.starts_with('/') && !url.chars().any(|c| c.is_whitespace() || c.is_control()))
+}
+
+/// Undoes a staged restore (before the app restarts).
+#[tauri::command]
+pub async fn cancel_restore(state: State<'_, AppState>) -> CmdResult<()> {
+    let pending = state.pipeline.data_dir.join(crate::backup::PENDING_RESTORE);
+    if pending.exists() {
+        std::fs::remove_dir_all(pending).map_err(err)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod link_tests {
+    #[test]
+    fn only_web_links_and_the_photos_settings_pane_open() {
+        for ok in ["https://maps.apple.com/?ll=1,2&q=Kyoto", "http://example.com", super::PHOTOS_PRIVACY_SETTINGS] {
+            assert!(super::is_openable_link(ok), "{ok}");
+        }
+        for bad in ["file:///etc/passwd", "/Applications/Calculator.app", "https://", "https:///x", "javascript:alert(1)",
+                    "x-apple.systempreferences:com.apple.preference.security", "https://a.com\n--args", "ssh://host", "HTTPS://upper.case"] {
+            assert!(!super::is_openable_link(bad), "{bad}");
+        }
+    }
 }
 
 /// Re-transcribe a Reel with a chosen language ("auto" to detect again) and update its places.
@@ -987,6 +1015,82 @@ pub async fn add_place_to_reel(state: State<'_, AppState>, reel_id: String, cand
 /// Removes a place from a Reel (the place stays if it has other sources or your own data).
 #[tauri::command]
 pub async fn remove_place_from_reel(state: State<'_, AppState>, place_id: String, reel_id: String) -> CmdResult<()> {
-    state.db.unlink_reel(&place_id, &reel_id).map_err(err)?;
+    state.pipeline.remove_place_from_source(&place_id, None, Some(&reel_id)).map_err(err)?;
     tidy(&state)
+}
+
+// MARK: Import files, trips, restore
+
+/// Images dropped on the window or picked in the Import screen. They're copied into the library's own import folder
+/// (named by content, so the same picture is never processed twice) and processed like any folder of screenshots —
+/// right away, or as soon as the current scan finishes.
+#[tauri::command]
+pub async fn import_screenshot_files(state: State<'_, AppState>, paths: Vec<String>) -> CmdResult<Value> {
+    let dest = state.pipeline.data_dir.join("imports");
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(std::path::PathBuf::from).collect();
+    let copy_to = dest.clone();
+    let imported = tauri::async_runtime::spawn_blocking(move || crate::services::folder::import_files(&paths, &copy_to))
+        .await.map_err(err)?.map_err(err)?;
+    let folder = dest.to_string_lossy().to_string();
+    let mut config = state.pipeline.config();
+    if !config.screenshot_folders.contains(&folder) {
+        config.screenshot_folders.push(folder.clone());
+        state.db.save_config(&config).map_err(err)?;
+        rebuild_ai(&state, config)?;
+    }
+    let busy = state.queue.snapshot().running;
+    if imported.added > 0 {
+        tauri::async_runtime::spawn(state.queue.clone().run_when_idle(RunMode::ScanFolder { path: folder }));
+    }
+    Ok(json!({ "added": imported.added, "alreadyImported": imported.already_imported, "skipped": imported.skipped, "queuedBehindScan": busy && imported.added > 0 }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct TripOrderItem {
+    id: String,
+    day: Option<i64>,
+}
+
+/// Saves the itinerary after drag and drop: the full order and each entry's day, in one transaction.
+#[tauri::command]
+pub async fn reorder_trip(state: State<'_, AppState>, trip_id: String, order: Vec<TripOrderItem>) -> CmdResult<()> {
+    let order: Vec<(String, Option<i64>)> = order.into_iter().map(|o| (o.id, o.day)).collect();
+    state.db.reorder_trip(&trip_id, &order).map_err(err)
+}
+
+/// Writes the trip as a Markdown itinerary to a file the user chose.
+#[tauri::command]
+pub async fn export_trip(state: State<'_, AppState>, trip_id: String, path: String) -> CmdResult<()> {
+    let md = crate::backup::trip_markdown(&state.db, &trip_id).map_err(err)?;
+    std::fs::write(&path, md).map_err(err)
+}
+
+/// Checks a backup and stages it; it replaces the library when the app restarts (the current one is kept).
+#[tauri::command]
+pub async fn restore_backup(state: State<'_, AppState>, path: String) -> CmdResult<crate::backup::RestorePreview> {
+    if state.queue.snapshot().running {
+        return Err("Stop the current scan before restoring a backup.".into());
+    }
+    let data_dir = state.pipeline.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::backup::stage_restore(std::path::Path::new(&path), &data_dir))
+        .await.map_err(err)?.map_err(err)
+}
+
+/// Restarts the app (e.g. to finish a restore).
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+/// Shows the library folder in Finder (for troubleshooting and manual backups).
+#[tauri::command]
+pub async fn reveal_data_folder(state: State<'_, AppState>) -> CmdResult<()> {
+    open_with_system(state.pipeline.data_dir.as_os_str()).map_err(err)?;
+    Ok(())
+}
+
+/// Opens a web link or folder with macOS `open` (default browser / Finder). Only ever called with a validated link or
+/// the app's own data folder.
+fn open_with_system(target: &std::ffi::OsStr) -> std::io::Result<()> {
+    std::process::Command::new("open").arg(target).spawn().map(|_| ())
 }

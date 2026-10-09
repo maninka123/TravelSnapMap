@@ -70,6 +70,26 @@ impl Pipeline {
         self.db.remove_if_unsupported(place_id)
     }
 
+    /// "This place isn't in this screenshot/Reel": removes the link (and its tips and photos) and remembers the
+    /// decision, so re-processing the source never puts the pin back.
+    pub fn remove_place_from_source(&self, place_id: &str, screenshot_id: Option<&str>, reel_id: Option<&str>) -> Result<()> {
+        let place = self.db.place(place_id)?;
+        let extracted = match (screenshot_id, reel_id) {
+            (Some(sid), _) => self.db.links_for_screenshot(sid)?.into_iter().find(|l| l.place_id == place_id).map(|l| l.extracted_name),
+            (None, Some(rid)) => self.db.reel_link_name(place_id, rid)?,
+            _ => anyhow::bail!("no source given"),
+        };
+        for name in extracted.into_iter().chain(place.map(|p| p.canonical_name)) {
+            self.db.reject_source_name(screenshot_id, reel_id, &name)?;
+        }
+        match (screenshot_id, reel_id) {
+            (Some(sid), _) => self.db.unlink(place_id, sid)?,
+            (None, Some(rid)) => self.db.unlink_reel(place_id, rid)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Resolves a Review Inbox item. `action` depends on the kind:
     /// travelClassification: yes | no · placeResolution: choose | confirm | dismiss
     /// duplicatePlace: merge | separate · photoCrop: accept | reject · processingFailure: retry | ignore
@@ -120,6 +140,9 @@ impl Pipeline {
                 if let Some(provisional) = review.place_a_id.as_deref() {
                     self.db.unlink(provisional, &sid)?;
                     self.drop_if_orphan(provisional)?;
+                }
+                if let Some(e) = &extracted {
+                    self.db.reject_source_name(Some(&sid), None, &e.display_name)?;
                 }
                 self.db.resolve_review(review_id, "not a place")?;
             }
@@ -303,6 +326,9 @@ impl Pipeline {
                 if let Some(provisional) = review.place_a_id.as_deref() {
                     self.db.unlink_reel(provisional, reel_id)?;
                     self.drop_if_orphan(provisional)?;
+                }
+                if let Some(e) = extracted {
+                    self.db.reject_source_name(None, Some(reel_id), &e.display_name)?;
                 }
                 self.db.resolve_review(&review.id, "not a place")?;
             }

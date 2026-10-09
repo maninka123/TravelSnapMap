@@ -55,9 +55,80 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<AssetInfo>) -> std::io::Result<(
     Ok(())
 }
 
+/// Result of copying dropped or picked image files into the app's own import folder.
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedFiles {
+    /// New images copied in (they'll be processed).
+    pub added: usize,
+    /// Same image content was imported before (skipped, so nothing is processed twice).
+    pub already_imported: usize,
+    /// Not an image TravelSnapMap can read (or unreadable).
+    pub skipped: usize,
+}
+
+pub fn is_image(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| EXTENSIONS.contains(&e.to_lowercase().as_str()))
+}
+
+/// Copies image files into `dest` under a name derived from their content, so the same picture dropped twice
+/// (even renamed) is recognised and never processed again. Other files are skipped.
+pub fn import_files(paths: &[PathBuf], dest: &Path) -> std::io::Result<ImportedFiles> {
+    use sha2::{Digest, Sha256};
+    std::fs::create_dir_all(dest)?;
+    let mut result = ImportedFiles::default();
+    for path in paths {
+        let Ok(meta) = std::fs::metadata(path) else { result.skipped += 1; continue };
+        if !meta.is_file() || !is_image(path) {
+            result.skipped += 1;
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(path) else { result.skipped += 1; continue };
+        let hash = hex::encode(&Sha256::digest(&bytes)[..12]);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png").to_lowercase();
+        let target = dest.join(format!("{hash}.{ext}"));
+        if target.exists() {
+            result.already_imported += 1;
+            continue;
+        }
+        // Write then rename, so a half-copied file is never picked up by a scan.
+        let partial = dest.join(format!(".{hash}.partial"));
+        std::fs::write(&partial, &bytes)?;
+        std::fs::rename(&partial, &target)?;
+        // Keep the original date so the library sorts it correctly.
+        if let Ok(modified) = meta.modified() {
+            let _ = std::fs::File::options().write(true).open(&target).and_then(|f| f.set_modified(modified));
+        }
+        result.added += 1;
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn importing_files_copies_images_once_and_skips_the_rest() {
+        let dir = std::env::temp_dir().join(format!("tsm-import-{}", uuid::Uuid::new_v4()));
+        let inbox = dir.join("inbox");
+        std::fs::create_dir_all(&inbox).unwrap();
+        std::fs::write(inbox.join("IMG_1.PNG"), b"one").unwrap();
+        std::fs::write(inbox.join("copy of IMG_1.png"), b"one").unwrap(); // same picture, renamed
+        std::fs::write(inbox.join("IMG_2.jpg"), b"two").unwrap();
+        std::fs::write(inbox.join("notes.txt"), b"hello").unwrap();
+        let paths: Vec<PathBuf> = ["IMG_1.PNG", "copy of IMG_1.png", "IMG_2.jpg", "notes.txt", "missing.png"]
+            .iter().map(|f| inbox.join(f)).collect();
+
+        let dest = dir.join("imports");
+        let first = import_files(&paths, &dest).unwrap();
+        assert_eq!(first, ImportedFiles { added: 2, already_imported: 1, skipped: 2 });
+        assert_eq!(scan_folder(&dest).unwrap().len(), 2, "no partial files are left behind");
+
+        let again = import_files(&paths, &dest).unwrap();
+        assert_eq!(again, ImportedFiles { added: 0, already_imported: 3, skipped: 2 }, "re-importing adds nothing");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn scans_images_recursively_and_ignores_others() {

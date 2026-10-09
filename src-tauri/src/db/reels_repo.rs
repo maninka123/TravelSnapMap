@@ -160,6 +160,15 @@ impl Database {
         })
     }
 
+    /// The name the place was found under in this Reel.
+    pub fn reel_link_name(&self, place_id: &str, reel_id: &str) -> Result<Option<String>> {
+        self.with(|c| c.query_row(
+            "SELECT extracted_name FROM place_reels WHERE place_id = ?1 AND reel_id = ?2",
+            params![place_id, reel_id],
+            |r| r.get(0),
+        ).optional())
+    }
+
     /// (place id, extracted name) pairs the user confirmed for this Reel.
     pub fn user_reel_links(&self, reel_id: &str) -> Result<Vec<(String, String)>> {
         self.with(|c| {
@@ -235,7 +244,8 @@ impl Database {
             tx.execute("DELETE FROM place_reels WHERE reel_id = ?1 AND is_user_verified = 0", [reel_id])?;
             tx.execute("DELETE FROM travel_facts WHERE reel_id = ?1 AND origin != 'user'", [reel_id])?;
             tx.execute("DELETE FROM place_images WHERE reel_id = ?1 AND origin != 'user'", [reel_id])?;
-            tx.execute("DELETE FROM review_items WHERE reel_id = ?1", [reel_id])?;
+            // Open questions are asked again if still relevant; answered ones stay in "Recently reviewed".
+            tx.execute("DELETE FROM review_items WHERE reel_id = ?1 AND is_resolved = 0", [reel_id])?;
             tx.execute(
                 "DELETE FROM places WHERE is_user_verified = 0 AND notes = '' AND personal_status = 'wantToVisit' \
                  AND NOT EXISTS (SELECT 1 FROM place_screenshots ps WHERE ps.place_id = places.id) \

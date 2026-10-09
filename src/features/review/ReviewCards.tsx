@@ -1,5 +1,6 @@
+import { Clapperboard, ExternalLink, Info, Smartphone } from "lucide-react";
 import { useState } from "react";
-import { ReviewService } from "../../api/services";
+import { ReelService, ReviewService, ScreenshotService } from "../../api/services";
 import type { PlaceCandidate, ReviewEntry } from "../../api/types";
 import { CandidateRow, ErrorNote, PlaceLine, Pill, Thumb } from "../../components/common";
 import { PlaceSearchDialog } from "../../components/PlacePicker";
@@ -46,15 +47,15 @@ export function ReviewCard({ entry, onOpen, compact = false }: { entry: ReviewEn
     <div className={`card review-card ${compact ? "compact" : ""}`}>
       {!compact && (
         <button className="review-thumb" onClick={onOpen} title="Open the screenshot or Reel">
-          <Thumb path={image?.imagePath ?? review.screenshotThumbnail} fallback={review.reelId ? "🎬" : "📸"} />
+          <Thumb path={image?.imagePath ?? review.screenshotThumbnail} fallback={review.reelId ? <Clapperboard size={22} /> : <Smartphone size={22} />} />
         </button>
       )}
       <div className="stack">
         <div className="row">
           <h3 className="grow review-title">{REVIEW_TITLES[review.kind]}</h3>
-          {!compact && onOpen && <button className="btn small ghost" onClick={onOpen}>Open ›</button>}
+          {!compact && onOpen && <button className="btn small ghost" onClick={onOpen}>View source <ExternalLink size={12} /></button>}
         </div>
-        <div className="muted">{review.message}</div>
+        <div className="review-why"><Info size={14} /><span>{review.message}</span></div>
         <ErrorNote error={action.error} onClose={action.clearError} />
 
         {review.kind === "travelClassification" && (
@@ -80,6 +81,8 @@ export function ReviewCard({ entry, onOpen, compact = false }: { entry: ReviewEn
             <div className="row">
               <button className="btn" onClick={() => setSearch(true)}>Search another place…</button>
               <button className="btn ghost" onClick={() => resolve("dismiss")}>Not a place</button>
+              <span className="spacer" />
+              <NotTravelButton entry={entry} />
             </div>
           </>
         )}
@@ -136,7 +139,7 @@ export function AnsweredCard({ entry, onOpen, compact = false }: { entry: Review
     <div className={`card review-card answered ${compact ? "compact" : ""}`}>
       {!compact && (
         <button className="review-thumb" onClick={onOpen} title="Open the screenshot or Reel">
-          <Thumb path={image?.imagePath ?? review.screenshotThumbnail} fallback={review.reelId ? "🎬" : "📸"} />
+          <Thumb path={image?.imagePath ?? review.screenshotThumbnail} fallback={review.reelId ? <Clapperboard size={22} /> : <Smartphone size={22} />} />
         </button>
       )}
       <div className="stack">
@@ -193,7 +196,7 @@ export function SourceReviews({ screenshotId, reelId }: { screenshotId?: string;
     <div className={`source-reviews ${open.length ? "has-open" : ""}`}>
       {open.length > 0 && (
         <>
-          <div className="source-reviews-head">⚑ Needs your review <span className="muted small">{open.length}</span></div>
+          <div className="source-reviews-head">Needs your review <span className="muted small">{open.length}</span></div>
           <div className="stack">{open.map((e) => <ReviewCard key={e.review.id} entry={e} compact />)}</div>
         </>
       )}
@@ -204,5 +207,18 @@ export function SourceReviews({ screenshotId, reelId }: { screenshotId?: string;
         </details>
       )}
     </div>
+  );
+}
+
+/** "Not travel": the whole screenshot or Reel is unrelated — nothing from it is used, and it isn't asked about again. */
+function NotTravelButton({ entry }: { entry: ReviewEntry }) {
+  const action = useAction();
+  const { review } = entry;
+  if (!review.screenshotId && !review.reelId) return null;
+  return (
+    <button className="btn ghost small" disabled={action.busy} title="Nothing in this source is about travel"
+            onClick={() => action.run(() => (review.reelId ? ReelService.action(review.reelId, "markNotTravel") : ScreenshotService.action(review.screenshotId!, "markNotTravel")))}>
+      Not travel
+    </button>
   );
 }

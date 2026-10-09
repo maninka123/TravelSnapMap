@@ -1,3 +1,4 @@
+import { StatusIcon } from "../../lib/icons";
 import { useState } from "react";
 import { PlaceService } from "../../api/services";
 import type { PersonalStatus, PlaceCandidate, PlaceCategory } from "../../api/types";
@@ -50,7 +51,7 @@ export function QuickAddPlace({ onClose }: { onClose: () => void }) {
           <div className="field"><label>Status</label>
             <div className="segmented wrap">
               {(["wantToVisit", "maybe", "visited", "favourite"] as PersonalStatus[]).map((s) => (
-                <button key={s} type="button" className={status === s ? "active" : ""} onClick={() => setStatus(s)}>{STATUS[s].emoji} {STATUS[s].label}</button>
+                <button key={s} type="button" className={status === s ? "active" : ""} onClick={() => setStatus(s)}><StatusIcon status={s} size={12} /> {STATUS[s].label}</button>
               ))}
             </div>
           </div>

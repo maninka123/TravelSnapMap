@@ -1,0 +1,198 @@
+/*
+ * TravelSnapMap design tokens. Light by default; dark follows macOS unless Settings → Appearance forces a theme
+ * (html[data-theme="light" | "dark"]). Colours are restrained: neutral surfaces, one teal travel accent, and status
+ * colours used only for meaning (wishlist, visited, favourite, warnings).
+ */
+:root {
+  --bg: #f4f4f2;
+  --bg-elevated: #fbfbfa;
+  --surface: #ffffff;
+  --surface-2: #f2f2f0;
+  --surface-sunken: #ececea;
+  --fill: rgba(60, 60, 67, 0.08);
+  --fill-strong: rgba(60, 60, 67, 0.15);
+  --separator: rgba(60, 60, 67, 0.12);
+  --border: rgba(60, 60, 67, 0.16);
+  --border-strong: rgba(60, 60, 67, 0.28);
+  --text: #1c1c1e;
+  --text-2: rgba(28, 28, 30, 0.78);
+  --muted: rgba(60, 60, 67, 0.64);
+  --faint: rgba(60, 60, 67, 0.42);
+
+  --accent: #0b7a83;
+  --accent-hover: #09686f;
+  --accent-text: #0a6d75;
+  --accent-soft: rgba(11, 122, 131, 0.11);
+  --accent-soft-strong: rgba(11, 122, 131, 0.19);
+  --on-accent: #ffffff;
+
+  --ok: #1f8a43;
+  --ok-soft: rgba(52, 168, 83, 0.13);
+  --warn: #b25b00;
+  --warn-soft: rgba(255, 149, 0, 0.15);
+  --bad: #c9302c;
+  --bad-soft: rgba(229, 62, 62, 0.11);
+  --info: #2d6cdf;
+  --info-soft: rgba(45, 108, 223, 0.11);
+
+  --status-wish: #d6336c;
+  --status-wish-soft: rgba(214, 51, 108, 0.11);
+  --status-visited: #1f8a43;
+  --status-visited-soft: rgba(31, 138, 67, 0.12);
+  --status-fav: #b7791f;
+  --status-fav-soft: rgba(236, 172, 32, 0.17);
+  --status-maybe: #2d6cdf;
+  --status-maybe-soft: rgba(45, 108, 223, 0.11);
+
+  --material-thick: rgba(246, 246, 244, 0.82);
+  --material: rgba(255, 255, 255, 0.78);
+  --material-edge: rgba(255, 255, 255, 0.6);
+  --blur: saturate(180%) blur(22px);
+  --scrim: rgba(20, 20, 22, 0.24);
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-xs: 5px;
+  --radius-s: 7px;
+  --radius: 10px;
+  --radius-l: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.09), 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-l: 0 22px 60px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --focus-ring: 0 0 0 3px rgba(11, 122, 131, 0.28);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.64, 0, 0.78, 0);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+
+  --sidebar-w: 224px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1b1b1d;
+    --bg-elevated: #232326;
+    --surface: #26262a;
+    --surface-2: #2e2e33;
+    --surface-sunken: #18181a;
+    --fill: rgba(235, 235, 245, 0.08);
+    --fill-strong: rgba(235, 235, 245, 0.15);
+    --separator: rgba(235, 235, 245, 0.1);
+    --border: rgba(235, 235, 245, 0.14);
+    --border-strong: rgba(235, 235, 245, 0.26);
+    --text: #f2f2f4;
+    --text-2: rgba(242, 242, 244, 0.82);
+    --muted: rgba(235, 235, 245, 0.6);
+    --faint: rgba(235, 235, 245, 0.38);
+    --accent: #2fb3bd;
+    --accent-hover: #45c2cb;
+    --accent-text: #5fcbd3;
+    --accent-soft: rgba(47, 179, 189, 0.16);
+    --accent-soft-strong: rgba(47, 179, 189, 0.26);
+    --on-accent: #06272a;
+    --ok: #4cc970;
+    --ok-soft: rgba(76, 201, 112, 0.16);
+    --warn: #f0a640;
+    --warn-soft: rgba(240, 166, 64, 0.16);
+    --bad: #ff6b63;
+    --bad-soft: rgba(255, 107, 99, 0.15);
+    --info: #6aa1ff;
+    --info-soft: rgba(106, 161, 255, 0.15);
+    --status-wish: #ff6b9a;
+    --status-wish-soft: rgba(255, 107, 154, 0.15);
+    --status-visited: #4cc970;
+    --status-visited-soft: rgba(76, 201, 112, 0.15);
+    --status-fav: #f2c14e;
+    --status-fav-soft: rgba(242, 193, 78, 0.16);
+    --status-maybe: #6aa1ff;
+    --status-maybe-soft: rgba(106, 161, 255, 0.15);
+    --material-thick: rgba(34, 34, 37, 0.82);
+    --material: rgba(42, 42, 46, 0.78);
+    --material-edge: rgba(255, 255, 255, 0.07);
+    --scrim: rgba(0, 0, 0, 0.45);
+    --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.42), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+    --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --focus-ring: 0 0 0 3px rgba(47, 179, 189, 0.38);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #1b1b1d;
+  --bg-elevated: #232326;
+  --surface: #26262a;
+  --surface-2: #2e2e33;
+  --surface-sunken: #18181a;
+  --fill: rgba(235, 235, 245, 0.08);
+  --fill-strong: rgba(235, 235, 245, 0.15);
+  --separator: rgba(235, 235, 245, 0.1);
+  --border: rgba(235, 235, 245, 0.14);
+  --border-strong: rgba(235, 235, 245, 0.26);
+  --text: #f2f2f4;
+  --text-2: rgba(242, 242, 244, 0.82);
+  --muted: rgba(235, 235, 245, 0.6);
+  --faint: rgba(235, 235, 245, 0.38);
+  --accent: #2fb3bd;
+  --accent-hover: #45c2cb;
+  --accent-text: #5fcbd3;
+  --accent-soft: rgba(47, 179, 189, 0.16);
+  --accent-soft-strong: rgba(47, 179, 189, 0.26);
+  --on-accent: #06272a;
+  --ok: #4cc970;
+  --ok-soft: rgba(76, 201, 112, 0.16);
+  --warn: #f0a640;
+  --warn-soft: rgba(240, 166, 64, 0.16);
+  --bad: #ff6b63;
+  --bad-soft: rgba(255, 107, 99, 0.15);
+  --info: #6aa1ff;
+  --info-soft: rgba(106, 161, 255, 0.15);
+  --status-wish: #ff6b9a;
+  --status-wish-soft: rgba(255, 107, 154, 0.15);
+  --status-visited: #4cc970;
+  --status-visited-soft: rgba(76, 201, 112, 0.15);
+  --status-fav: #f2c14e;
+  --status-fav-soft: rgba(242, 193, 78, 0.16);
+  --status-maybe: #6aa1ff;
+  --status-maybe-soft: rgba(106, 161, 255, 0.15);
+  --material-thick: rgba(34, 34, 37, 0.82);
+  --material: rgba(42, 42, 46, 0.78);
+  --material-edge: rgba(255, 255, 255, 0.07);
+  --scrim: rgba(0, 0, 0, 0.45);
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.42), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  --shadow-l: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --focus-ring: 0 0 0 3px rgba(47, 179, 189, 0.38);
+  color-scheme: dark;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --separator: rgba(0, 0, 0, 0.36);
+    --border: rgba(0, 0, 0, 0.5);
+    --muted: rgba(0, 0, 0, 0.74);
+  }
+}

@@ -195,6 +195,190 @@ pub fn write_json(value: &Value, dest: &Path) -> Result<PathBuf> {
     Ok(dest.to_path_buf())
 }
 
+/// A trip as a Markdown itinerary: days in order, each place with where it is, your notes, the practical tips you
+/// saved (with their date — they may be out of date) and an Apple Maps link. Nothing is invented.
+pub fn trip_markdown(db: &Database, trip_id: &str) -> Result<String> {
+    use crate::models::TravelFactType as F;
+    use std::fmt::Write;
+    let trip = db.trip(trip_id)?.ok_or_else(|| anyhow::anyhow!("trip not found"))?;
+    let entries = db.trip_entries(trip_id)?;
+    let mut md = format!("# {}\n\n", trip.name.trim());
+    let dates = match (&trip.start_date, &trip.end_date) {
+        (Some(a), Some(b)) => format!("{a} – {b} · "),
+        (Some(a), None) => format!("From {a} · "),
+        _ => String::new(),
+    };
+    writeln!(md, "{dates}{} place{}\n", entries.len(), if entries.len() == 1 { "" } else { "s" })?;
+    if !trip.notes.trim().is_empty() {
+        writeln!(md, "{}\n", trip.notes.trim())?;
+    }
+    let practical = [F::OpeningHours, F::Price, F::Ticket, F::Reservation, F::RecommendedTime, F::Warning];
+    let mut current: Option<Option<i64>> = None;
+    let mut n = 0;
+    for e in &entries {
+        if current != Some(e.day) {
+            current = Some(e.day);
+            n = 0;
+            match e.day {
+                Some(d) => writeln!(md, "## Day {d}\n")?,
+                None => writeln!(md, "## Not scheduled yet\n")?,
+            }
+        }
+        n += 1;
+        let p = &e.place;
+        let place_line = [p.city.as_deref(), p.country.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(", ");
+        writeln!(md, "{n}. **{}** — {}{}", p.canonical_name, category_label(p.category.as_str()),
+                 if place_line.is_empty() { String::new() } else { format!(" · {place_line}") })?;
+        if p.personal_status.as_str() == "visited" {
+            writeln!(md, "   - Visited{}", p.visited_at.as_deref().map(|d| format!(" on {d}")).unwrap_or_default())?;
+        }
+        if !p.notes.trim().is_empty() {
+            writeln!(md, "   - Your notes: {}", p.notes.trim().replace('\n', " "))?;
+        }
+        let facts = db.facts_for_place(&p.id)?;
+        for f in facts.iter().filter(|f| practical.contains(&f.fact_type)).take(4) {
+            let saved = f.valid_from.as_deref().map(|d| format!(" _(saved {})_", &d[..d.len().min(10)])).unwrap_or_default();
+            writeln!(md, "   - {}{saved}", f.text.trim())?;
+        }
+        writeln!(md, "   - [Open in Apple Maps](https://maps.apple.com/?ll={:.6},{:.6}&q={})", p.latitude, p.longitude, url_encode(&p.canonical_name))?;
+    }
+    writeln!(md, "\n---\n_Exported from TravelSnapMap. Tips come from your saved screenshots and Reels and may be out of date — check before you go._")?;
+    Ok(md)
+}
+
+fn category_label(category: &str) -> String {
+    let mut words = String::new();
+    for (i, c) in category.chars().enumerate() {
+        if c.is_uppercase() && i > 0 { words.push(' '); }
+        words.push(if i == 0 { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() });
+    }
+    words
+}
+
+fn url_encode(s: &str) -> String {
+    s.bytes().map(|b| match b {
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+        _ => format!("%{b:02X}"),
+    }).collect()
+}
+
+// MARK: Restore
+
+/// Folder (inside the data directory) holding a checked backup that replaces the library on next launch.
+pub const PENDING_RESTORE: &str = "restore-pending";
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePreview {
+    pub places: i64,
+    pub screenshots: i64,
+    pub reels: i64,
+    pub trips: i64,
+    pub schema_version: i64,
+}
+
+/// Checks that a file is a healthy TravelSnapMap library this version can open (read-only; nothing is changed).
+pub fn inspect_backup_library(db_path: &Path) -> Result<RestorePreview> {
+    use rusqlite::OpenFlags;
+    let conn = rusqlite::Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .context("This backup doesn't contain a readable TravelSnapMap library")?;
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).context("not a TravelSnapMap library")?;
+    anyhow::ensure!(version >= 1, "This file isn't a TravelSnapMap library.");
+    anyhow::ensure!(version <= crate::db::SCHEMA_VERSION,
+        "This backup was made by a newer version of TravelSnapMap (library v{version}). Update the app first.");
+    let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    anyhow::ensure!(check == "ok", "This backup's library is damaged ({check}).");
+    let count = |table: &str| -> Result<i64> {
+        Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).context("not a TravelSnapMap library")?)
+    };
+    let reels = if version >= 2 { count("reels")? } else { 0 };
+    Ok(RestorePreview { places: count("places")?, screenshots: count("screenshots")?, reels, trips: count("trips")?, schema_version: version })
+}
+
+/// The folder with `travelsnapmap.sqlite` in an unpacked backup (the backup's own folder, or the root).
+fn backup_root(unpacked: &Path) -> Result<PathBuf> {
+    if unpacked.join("travelsnapmap.sqlite").is_file() {
+        return Ok(unpacked.to_path_buf());
+    }
+    for entry in std::fs::read_dir(unpacked)? {
+        let path = entry?.path();
+        if path.join("travelsnapmap.sqlite").is_file() {
+            return Ok(path);
+        }
+    }
+    anyhow::bail!("This zip isn't a TravelSnapMap backup (no library inside).")
+}
+
+/// Unpacks and checks a backup, then stages it to replace the library the next time the app starts. The current
+/// library isn't touched now; on restart it is moved to `backups/before-restore-…` (never deleted).
+pub fn stage_restore(zip: &Path, data_dir: &Path) -> Result<RestorePreview> {
+    let unpacked = data_dir.join(format!(".restore-{}", uuid::Uuid::new_v4()));
+    let result = (|| -> Result<RestorePreview> {
+        let status = std::process::Command::new("ditto").args(["-x", "-k"]).arg(zip).arg(&unpacked).status()
+            .context("unpacking the backup")?;
+        anyhow::ensure!(status.success(), "This file couldn't be unpacked. Is it a TravelSnapMap backup (.zip)?");
+        stage_unpacked(&unpacked, data_dir)
+    })();
+    let _ = std::fs::remove_dir_all(&unpacked);
+    result
+}
+
+/// Second half of `stage_restore`, for an already unpacked backup.
+pub fn stage_unpacked(unpacked: &Path, data_dir: &Path) -> Result<RestorePreview> {
+    let root = backup_root(unpacked)?;
+    let preview = inspect_backup_library(&root.join("travelsnapmap.sqlite"))?;
+    let pending = data_dir.join(PENDING_RESTORE);
+    let _ = std::fs::remove_dir_all(&pending);
+    std::fs::rename(&root, &pending).or_else(|_| copy_tree(&root, &pending).map(|_| ()))?;
+    Ok(preview)
+}
+
+/// On launch, before the library is opened: swaps in a staged restore. The current library and its files are moved
+/// to `backups/before-restore-<time>/`; if anything fails they are moved back. Returns where the old library went.
+pub fn apply_pending_restore(data_dir: &Path) -> Result<Option<PathBuf>> {
+    let pending = data_dir.join(PENDING_RESTORE);
+    if !pending.join("travelsnapmap.sqlite").is_file() {
+        return Ok(None);
+    }
+    let keep = data_dir.join("backups").join(format!("before-restore-{}", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+    std::fs::create_dir_all(&keep)?;
+    let mut items: Vec<String> = ["travelsnapmap.sqlite", "travelsnapmap.sqlite-wal", "travelsnapmap.sqlite-shm"].map(String::from).to_vec();
+    items.extend(INCLUDED_DIRS.iter().map(|d| d.to_string()));
+    let mut moved_out = Vec::new();
+    let mut moved_in = Vec::new();
+    let result = (|| -> Result<()> {
+        for name in &items {
+            if data_dir.join(name).exists() {
+                std::fs::rename(data_dir.join(name), keep.join(name))?;
+                moved_out.push(name.clone());
+            }
+        }
+        std::fs::rename(pending.join("travelsnapmap.sqlite"), data_dir.join("travelsnapmap.sqlite"))?;
+        moved_in.push("travelsnapmap.sqlite".to_string());
+        for dir in INCLUDED_DIRS {
+            let src = pending.join("files").join(dir);
+            if src.is_dir() {
+                std::fs::rename(&src, data_dir.join(dir))?;
+                moved_in.push(dir.to_string());
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        // Put everything back the way it was.
+        for name in &moved_in {
+            let _ = std::fs::remove_dir_all(data_dir.join(name)).or_else(|_| std::fs::remove_file(data_dir.join(name)));
+        }
+        for name in &moved_out {
+            let _ = std::fs::rename(keep.join(name), data_dir.join(name));
+        }
+        return Err(e.context("restoring the backup failed; your library was left as it was"));
+    }
+    let _ = std::fs::remove_dir_all(&pending);
+    log::info!("restored a backup; the previous library is in {}", keep.display());
+    Ok(Some(keep))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +434,82 @@ mod tests {
         assert_eq!(features[0]["properties"]["sourceCount"], 0);
         let all = places_json(&db).unwrap();
         assert_eq!(all["placeCount"], 2);
+    }
+
+    /// Restore: a checked backup replaces the library on next launch; the old library is kept, not deleted.
+    #[test]
+    fn restore_swaps_in_the_backup_and_keeps_the_old_library() {
+        let dir = std::env::temp_dir().join(format!("tsm-restore-{}", uuid::Uuid::new_v4()));
+        let data = dir.join("data");
+        // The library in use: one place, one crop.
+        std::fs::create_dir_all(data.join("crops")).unwrap();
+        std::fs::write(data.join("crops/current.jpg"), b"now").unwrap();
+        let db = Database::open(&data.join("travelsnapmap.sqlite")).unwrap();
+        db.insert_place(&candidate("Current place", 1.0, 1.0), PlaceCategory::Other, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        drop(db);
+        // An unpacked backup with two places and a trip.
+        let unpacked = dir.join("unpacked/TravelSnapMap Backup 2026-01-01 1200");
+        std::fs::create_dir_all(unpacked.join("files/crops")).unwrap();
+        std::fs::write(unpacked.join("files/crops/old.jpg"), b"then").unwrap();
+        let backup = Database::open(&unpacked.join("travelsnapmap.sqlite")).unwrap();
+        backup.insert_place(&candidate("Fushimi Inari", 34.967, 135.772), PlaceCategory::Temple, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        backup.insert_place(&candidate("Kiyomizu-dera", 34.994, 135.785), PlaceCategory::Temple, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        backup.create_trip("Kyoto").unwrap();
+        drop(backup);
+
+        let preview = stage_unpacked(&dir.join("unpacked"), &data).unwrap();
+        assert_eq!((preview.places, preview.trips, preview.schema_version), (2, 1, crate::db::SCHEMA_VERSION));
+        assert_eq!(Database::open(&data.join("travelsnapmap.sqlite")).unwrap().list_places(&PlaceFilter::default()).unwrap().len(), 1,
+                   "nothing changes until the app restarts");
+
+        let kept = apply_pending_restore(&data).unwrap().expect("restore applied");
+        let restored = Database::open(&data.join("travelsnapmap.sqlite")).unwrap();
+        assert_eq!(restored.list_places(&PlaceFilter::default()).unwrap().len(), 2);
+        assert!(data.join("crops/old.jpg").exists() && !data.join("crops/current.jpg").exists());
+        assert!(kept.join("travelsnapmap.sqlite").exists() && kept.join("crops/current.jpg").exists(), "old library kept");
+        assert!(!data.join(PENDING_RESTORE).exists());
+        assert_eq!(apply_pending_restore(&data).unwrap(), None, "applied once");
+        drop(restored);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn restore_refuses_files_that_are_not_a_healthy_library() {
+        let dir = std::env::temp_dir().join(format!("tsm-badrestore-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/travelsnapmap.sqlite"), b"definitely not sqlite").unwrap();
+        assert!(stage_unpacked(&dir.join("a"), &dir.join("data")).is_err());
+        std::fs::create_dir_all(dir.join("b")).unwrap();
+        rusqlite::Connection::open(dir.join("b/travelsnapmap.sqlite")).unwrap().execute_batch("PRAGMA user_version = 99").unwrap();
+        let err = stage_unpacked(&dir.join("b"), &dir.join("data")).unwrap_err().to_string();
+        assert!(err.contains("newer version"), "{err}");
+        std::fs::create_dir_all(dir.join("c")).unwrap();
+        assert!(stage_unpacked(&dir.join("c"), &dir.join("data")).unwrap_err().to_string().contains("isn't a TravelSnapMap backup"));
+        assert!(!dir.join("data").join(PENDING_RESTORE).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn trip_export_lists_days_in_order_with_saved_tips_only() {
+        let db = Database::open_in_memory().unwrap();
+        let a = db.insert_place(&candidate("Fushimi Inari", 34.967, 135.772), PlaceCategory::Temple, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        let b = db.insert_place(&candidate("Nishiki Market", 35.005, 135.764), PlaceCategory::Food, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        let c = db.insert_place(&candidate("Kiyomizu-dera", 34.994, 135.785), PlaceCategory::Temple, Verification::Verified, DataOrigin::MapKit, &[]).unwrap();
+        db.insert_fact(&a.id, crate::models::TravelFactType::RecommendedTime, "Go before 8 AM", None, 0.9,
+            &crate::db::FactProvenance { screenshot_id: None, reel_id: None, kind: "user", time_sec: None, block_ids: vec![], valid_from: Some("2025-03-01T00:00:00Z") },
+            DataOrigin::User).unwrap();
+        let trip = db.create_trip("Kyoto weekend").unwrap();
+        for p in [&a, &b, &c] { db.add_to_trip(&trip, &p.id).unwrap(); }
+        let entries = db.trip_entries(&trip).unwrap();
+        let id = |name: &str| entries.iter().find(|e| e.place.canonical_name == name).unwrap().id.clone();
+        // Drag and drop: Nishiki first on day 1, then Fushimi on day 1; Kiyomizu unscheduled.
+        db.reorder_trip(&trip, &[(id("Nishiki Market"), Some(1)), (id("Fushimi Inari"), Some(1)), (id("Kiyomizu-dera"), None)]).unwrap();
+
+        let md = trip_markdown(&db, &trip).unwrap();
+        let (nishiki, fushimi, later) = (md.find("Nishiki").unwrap(), md.find("Fushimi").unwrap(), md.find("## Not scheduled").unwrap());
+        assert!(md.starts_with("# Kyoto weekend") && md.contains("## Day 1"));
+        assert!(nishiki < fushimi && fushimi < later, "{md}");
+        assert!(md.contains("Go before 8 AM _(saved 2025-03-01)_"));
+        assert!(md.contains("https://maps.apple.com/?ll=34.967000,135.772000&q=Fushimi%20Inari"));
     }
 }

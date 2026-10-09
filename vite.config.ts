@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -11,4 +12,10 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/**"] },
   },
   build: { target: "safari17", chunkSizeWarningLimit: 2000 },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["src/test/setup.ts"],
+    css: false,
+    testTimeout: 15000,
+  },
 });

@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { LibraryService, ProcessingService, ScreenshotService } from "../../api/services";
 import type { ScreenshotView } from "../../api/types";
+import { Clapperboard, ChevronDown, Mic, MapPin, RotateCcw, Search, Smartphone } from "lucide-react";
 import { Empty, Pill, Thumb } from "../../components/common";
+import { Menu, MenuItem, MenuLabel, MenuSeparator, Segmented } from "../../components/ui";
 import { formatDate, formatTime, PROCESSING, SOURCE } from "../../lib/labels";
 import { useAction, useLoad, useNav } from "../../lib/nav";
-import { ImportReelDialog } from "../reels/ImportReelDialog";
-import { ScanControls } from "../../components/ScanControls";
-import { LibraryProgress } from "../../components/LibraryProgress";
 
 // The three filters people actually use; the rest live one level deeper under "More".
 const PRIMARY: { key: ScreenshotView; label: string }[] = [
@@ -29,7 +28,6 @@ export function SourcesView() {
   const [view, setView] = useState<ScreenshotView>("all");
   const [kind, setKind] = useState<"all" | "screenshot" | "reel">("all");
   const [search, setSearch] = useState("");
-  const [importing, setImporting] = useState(false);
   const action = useAction();
   const PAGE = 300;
   const [limit, setLimit] = useState(PAGE);
@@ -59,64 +57,51 @@ export function SourcesView() {
   }, [shotRefs, items, shown, kind]);
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h2>Sources</h2>
-        <div className="segmented">
-          {(["all", "screenshot", "reel"] as const).map((k) => (
-            <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
-              {k === "all" ? "All" : k === "screenshot" ? "📸 Screenshots" : "🎬 Reels"}
-            </button>
-          ))}
-        </div>
-        <ScanControls />
-        <button className="btn" onClick={() => setImporting(true)}>🎬 Import Reels</button>
-      </div>
-
-      <LibraryProgress />
-
+    <div>
       <div className="toolbar">
-        <input style={{ width: 280 }} placeholder="Search text, captions, transcripts, creators…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <div className="segmented">
-          {PRIMARY.map((v) => (
-            <button key={v.key} className={view === v.key ? "active" : ""} onClick={() => setView(v.key)}>
-              {v.label}{counts?.[v.key] !== undefined && <span className="tab-count">{counts[v.key].toLocaleString()}</span>}
-            </button>
-          ))}
-        </div>
-        <details className="menu filter-more" key={view}>
-          <summary className={`chip-btn ${MORE.some((m) => m.key === view) ? "active" : ""}`}>
+        <label className="search-field" style={{ width: 300 }}>
+          <Search size={15} aria-hidden="true" />
+          <input data-search placeholder="Search text, captions, transcripts, creators…" aria-label="Search sources" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </label>
+        <Segmented label="Kind of source" value={kind} onChange={setKind} options={[
+          { value: "all", label: "All" },
+          { value: "screenshot", label: <><Smartphone size={13} /> Screenshots</> },
+          { value: "reel", label: <><Clapperboard size={13} /> Reels</> },
+        ]} />
+        <Segmented label="Show" value={PRIMARY.some((p) => p.key === view) ? view : ("more" as ScreenshotView)} onChange={setView} options={PRIMARY.map((v) => ({
+          value: v.key, label: <>{v.label}{counts?.[v.key] !== undefined && <span className="tab-count">{counts[v.key].toLocaleString()}</span>}</>,
+        }))} />
+        <Menu align="start" trigger={
+          <button className={`chip-btn ${MORE.some((m) => m.key === view) ? "active" : ""}`}>
             {MORE.find((m) => m.key === view)?.label ?? "More"}
-            {MORE.some((m) => m.key === view) && counts && <span className="tab-count">{counts.current.toLocaleString()}</span>} ▾
-          </summary>
-          <div className="menu-items card more-menu" style={{ left: 0, right: "auto" }}>
-            {(["Travel", "Other"] as const).map((section) => (
-              <div key={section} className="more-section">
-                <h5>{section}</h5>
-                {MORE.filter((m) => m.section === section)
-                  // "Not read yet" only when something is actually waiting.
-                  .filter((m) => m.key !== "pending" || (moreCounts?.pending ?? 0) > 0 || view === "pending")
-                  .map((m) => (
-                    <button key={m.key} className={`more-item ${view === m.key ? "active" : ""}`} onClick={() => setView(m.key)} title={m.hint}>
-                      <span className="grow">{m.label}</span>
-                      {moreCounts?.[m.key] !== undefined && <span className="tab-count">{moreCounts[m.key].toLocaleString()}</span>}
-                    </button>
-                  ))}
-              </div>
-            ))}
-          </div>
-        </details>
+            {MORE.some((m) => m.key === view) && counts && <span className="tab-count">{counts.current.toLocaleString()}</span>} <ChevronDown size={12} />
+          </button>}>
+          {(["Travel", "Other"] as const).map((section, si) => (
+            <div key={section}>
+              {si > 0 && <MenuSeparator />}
+              <MenuLabel>{section}</MenuLabel>
+              {MORE.filter((m) => m.section === section)
+                // "Not read yet" only when something is actually waiting.
+                .filter((m) => m.key !== "pending" || (moreCounts?.pending ?? 0) > 0 || view === "pending")
+                .map((m) => (
+                  <MenuItem key={m.key} onSelect={() => setView(m.key)} hint={moreCounts?.[m.key]?.toLocaleString()}>
+                    <span title={m.hint}>{m.label}</span>
+                  </MenuItem>
+                ))}
+            </div>
+          ))}
+        </Menu>
         {(view === "failed" || view === "needsReview") && shown.length > 0 && (
           <button className="btn small" onClick={() => action.run(() => ProcessingService.reprocess(view === "failed" ? "failed" : "needsReview"))}>
-            Reprocess all
+            <RotateCcw size={13} /> Read again
           </button>
         )}
       </div>
 
       {error && <p className="bad">{error}</p>}
       {shown.length === 0 ? (
-        <Empty icon="📸" title="Nothing here yet">
-          Scan your Photos library for screenshots, or paste an Instagram Reel link with “Import Reel”.
+        <Empty icon={<Smartphone size={26} />} title={search ? "No matches" : "Nothing here yet"}>
+          {search ? `No screenshot or Reel contains “${search}”.` : "Screenshots and Reels you import appear here, with the places found in them."}
         </Empty>
       ) : (
         <div className="grid small-tiles">
@@ -125,16 +110,16 @@ export function SourcesView() {
               const r = item.reel;
               const p = PROCESSING[r.status];
               return (
-                <div key={`r-${r.id}`} className="tile portrait" onClick={() => nav.openReel(r.id, undefined, list)}>
-                  <span className="kind-badge">🎬 {r.durationSec ? formatTime(r.durationSec) : "Reel"}</span>
-                  <Thumb path={r.thumbnailPath} fallback="🎬" />
+                <div key={`r-${r.id}`} className="tile portrait source-tile" role="button" tabIndex={0} onClick={() => nav.openReel(r.id, undefined, list)}>
+                  <span className="kind-badge"><Clapperboard size={11} /> {r.durationSec ? formatTime(r.durationSec) : "Reel"}</span>
+                  <Thumb path={r.thumbnailPath} fallback={<Clapperboard size={24} />} />
                   <div className="tile-body">
                     <span className="small strong tile-title">{r.creator ?? "Instagram Reel"}</span>
                     <span className="muted small tile-title">{r.caption ?? r.url}</span>
                     <div className="row wrap">
                       {r.status === "needsReview" && <Pill tone={p.tone}>{p.label}</Pill>}
-                      {r.placeCount > 0 && <span className="muted small">{r.placeCount} 📍</span>}
-                      {r.transcript.length > 0 && <span className="muted small" title="Voice transcript saved">🎙️</span>}
+                      {r.placeCount > 0 && <span className="muted small row" style={{ gap: 3 }}><MapPin size={12} />{r.placeCount}</span>}
+                      {r.transcript.length > 0 && <span className="muted small" title="Voice transcript saved"><Mic size={12} /></span>}
                     </div>
                   </div>
                 </div>
@@ -143,15 +128,14 @@ export function SourcesView() {
             const s = item.screenshot;
             const p = PROCESSING[s.status];
             return (
-              <div key={`s-${s.id}`} className="tile portrait" onClick={() => nav.openScreenshot(s.id, undefined, list)}>
-                <span className="kind-badge">📸</span>
-                <Thumb path={s.thumbnailPath} />
+              <div key={`s-${s.id}`} className="tile portrait source-tile" role="button" tabIndex={0} onClick={() => nav.openScreenshot(s.id, undefined, list)}>
+                                <Thumb path={s.thumbnailPath} />
                 <div className="tile-body">
                   <span className="small">{formatDate(s.creationDate)}</span>
                   <span className="muted small">{SOURCE[s.sourceType]}{s.creator ? ` · ${s.creator}` : ""}</span>
                   <div className="row wrap">
                     {s.status === "needsReview" && <Pill tone={p.tone}>{p.label}</Pill>}
-                    {s.placeCount > 0 && <span className="muted small">{s.placeCount} 📍</span>}
+                    {s.placeCount > 0 && <span className="muted small row" style={{ gap: 3 }}><MapPin size={12} />{s.placeCount}</span>}
                   </div>
                 </div>
               </div>
@@ -166,7 +150,6 @@ export function SourcesView() {
           <button className="btn ghost" onClick={() => setLimit(counts.current)}>Show all</button>
         </div>
       )}
-      {importing && <ImportReelDialog onClose={() => setImporting(false)} />}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { FileText, Video } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState } from "react";
 import { ReelService, type BulkReelImport } from "../../api/services";
@@ -66,16 +67,16 @@ export function ImportReelDialog({ onClose }: { onClose: () => void }) {
         <span className="muted small grow">
           {text.trim() === "" ? "Tip: ⌘V a whole list, then ⌘↩ to import." : count === 0 ? "No Instagram Reel or post links found yet." : `${count} link${count === 1 ? "" : "s"} found`}
         </span>
-        <button className="btn" disabled={action.busy} onClick={importFile}>📄 Choose text file…</button>
+        <button className="btn" disabled={action.busy} onClick={importFile}><FileText size={14} /> Choose text file…</button>
         <button className="btn primary" disabled={count === 0 || action.busy} onClick={importText}>
           {action.busy ? "Importing…" : count > 1 ? `Import ${count} Reels` : "Import"}
         </button>
       </div>
       {result && (
         <div className="disclaimer">
-          ✓ Found {result.found} link{result.found === 1 ? "" : "s"}: {result.added} new
+          Found {result.found} link{result.found === 1 ? "" : "s"}: {result.added} new
           {result.alreadyImported > 0 ? `, ${result.alreadyImported} already in your library` : ""}.
-          {result.ids.length > 0 ? ` Processing ${result.ids.length} one after another in the background — watch them under Sources → Reels.` : ""}
+          {result.ids.length > 0 ? ` Processing ${result.ids.length} one after another in the background — follow them in Import.` : ""}
         </div>
       )}
       {result && result.found === 0 && <p className="muted small">That file didn't contain any Instagram Reel or post links.</p>}
@@ -96,7 +97,7 @@ export function PhotosVideoPicker({ reelId, onClose }: { reelId: string | null; 
       <div className="candidate-list">
         {videos?.slice(0, 60).map((v) => (
           <div key={v.id} className="candidate">
-            <span>🎞️ {formatDate(v.creationDate)} · {formatTime(v.durationSec)}</span>
+            <span className="row"><Video size={14} className="muted" /> {formatDate(v.creationDate)} · {formatTime(v.durationSec)}</span>
             <button className="btn" disabled={action.busy} onClick={async () => {
               if (await action.run(() => ReelService.attachPhotoVideo(reelId, v.id)) !== undefined) onClose();
             }}>Use</button>
